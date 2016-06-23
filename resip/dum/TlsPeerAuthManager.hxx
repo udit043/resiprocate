@@ -24,8 +24,8 @@ class TlsPeerAuthManager : public DumFeature
          Rejected
       };
 
-      TlsPeerAuthManager(DialogUsageManager& dum, TargetCommand::Target& target, std::set<Data>& trustedPeers, bool thirdPartyRequiresCertificate = true);
-      TlsPeerAuthManager(DialogUsageManager& dum, TargetCommand::Target& target, std::set<Data>& trustedPeers, bool thirdPartyRequiresCertificate, CommonNameMappings& commonNameMappings);
+      TlsPeerAuthManager(DialogUsageManager& dum, TargetCommand::Target& target, const std::set<Data>& trustedPeers, bool thirdPartyRequiresCertificate = true);
+      TlsPeerAuthManager(DialogUsageManager& dum, TargetCommand::Target& target, const std::set<Data>& trustedPeers, bool thirdPartyRequiresCertificate, CommonNameMappings& commonNameMappings);
       virtual ~TlsPeerAuthManager();
 
       virtual ProcessingResult process(Message* msg);      
@@ -42,11 +42,15 @@ class TlsPeerAuthManager : public DumFeature
       /// should return true if the request must be challenged
       /// The default is to challenge all requests - override this class to change this beviour
       virtual bool requiresAuthorization(const SipMessage& msg);
+      /// should return true if the request should be trusted based on
+      /// the source/transport
+      /// default implementation uses mTrustedPeers
+      virtual bool isTrustedSource(const SipMessage& msg);
 
    private:
       std::set<Data> mTrustedPeers;
-      CommonNameMappings mCommonNameMappings;
       bool mThirdPartyRequiresCertificate;
+      CommonNameMappings mCommonNameMappings;
 };
 
  

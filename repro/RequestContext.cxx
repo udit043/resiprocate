@@ -100,7 +100,7 @@ RequestContext::process(std::auto_ptr<resip::SipMessage> sipMessage)
    SipMessage* sip = dynamic_cast<SipMessage*>(mCurrentEvent);
    if (!mOriginalRequest) 
    { 
-      assert(sip);
+      resip_assert(sip);
       mOriginalRequest=sip;
       original = true;
       mResponseContext.mIsClientBehindNAT = InteropHelper::getClientNATDetectionMode() != InteropHelper::ClientNATDetectionDisabled && 
@@ -155,8 +155,7 @@ RequestContext::process(std::auto_ptr<resip::SipMessage> sipMessage)
       Uri& requestUri = sip->header(h_RequestLine).uri();
       if(requestUri.exists(resip::p_wsSrcIp) &&
             requestUri.exists(resip::p_wsSrcPort) &&
-            sip->getSource().getType() != resip::WS &&
-            sip->getSource().getType() != resip::WSS)
+            !isWebSocket(sip->getSource().getType()))
       {
          requestUri.host() = requestUri.param(resip::p_wsSrcIp);
          requestUri.remove(resip::p_wsSrcIp);
@@ -183,14 +182,14 @@ RequestContext::process(std::auto_ptr<resip::SipMessage> sipMessage)
    }
    else if (sip->isResponse())
    {
-      assert(!original);
+      resip_assert(!original);
       bool postProcess=false;
       switch(mOriginalRequest->method())
       {
          case ACK:
             // !bwc! Got a response to an ACK? 
             // Why did the stack let this through?
-            assert(0);
+            resip_assert(0);
             break;
          case INVITE:
             postProcess=processResponseInviteTransaction(sip);
@@ -210,11 +209,11 @@ bool
 RequestContext::processRequestInviteTransaction(SipMessage* msg, bool original)
 {
    bool doPostProcess=false;
-   assert(msg->isRequest());
+   resip_assert(msg->isRequest());
    
    if(original)
    {
-      assert(msg->method()==INVITE);
+      resip_assert(msg->method()==INVITE);
 
       try
       {
@@ -252,7 +251,7 @@ RequestContext::processRequestInviteTransaction(SipMessage* msg, bool original)
          // up that makes bad ACK/200 look like a new transaction, like it
          // is supposed to be.)
          // TODO Remove this code block entirely.
-         assert(0);
+         resip_assert(0);
          
          DebugLog(<<"This ACK has the same tid as the original INVITE.");
          DebugLog(<<"The reponse we sent back was a " 
@@ -272,17 +271,9 @@ RequestContext::processRequestInviteTransaction(SipMessage* msg, bool original)
             InfoLog(<<"Got an ACK within an INVITE transaction, but our "
                      "response was a 2xx. Someone didn't change their tid "
                      "like they were supposed to...");
-            if(
-               (
-                  msg->exists(h_Routes) && 
-                  !msg->header(h_Routes).empty()
-               ) 
-               ||
-               (
-                  !getProxy().isMyUri(msg->header(h_RequestLine).uri()) && 
-                  (msg->header(h_From).isWellFormed() && getProxy().isMyUri(msg->header(h_From).uri())) 
-               )
-               )
+            if((msg->exists(h_Routes) && !msg->header(h_Routes).empty()) ||   // If ACK/200 has a Route header   OR
+               (!getProxy().isMyUri(msg->header(h_RequestLine).uri()) &&      // RequestUri is not us and From Uri is our domain
+                (msg->header(h_From).isWellFormed() && getProxy().isMyUri(msg->header(h_From).uri()))))
             {
                forwardAck200(*msg);
             }
@@ -299,7 +290,7 @@ RequestContext::processRequestInviteTransaction(SipMessage* msg, bool original)
                                     "Why?"
                                     " Orig: " << mOriginalRequest->brief() <<
                                     " This: " << msg->brief());
-         assert(0);
+         resip_assert(0);
       }
    }
 
@@ -310,12 +301,12 @@ RequestContext::processRequestInviteTransaction(SipMessage* msg, bool original)
 bool
 RequestContext::processRequestNonInviteTransaction(SipMessage* msg, bool original)
 {
-   assert(msg->isRequest());
+   resip_assert(msg->isRequest());
    bool doPostProcess=false;
    
    if(original)
    {
-      assert(msg->method()==mOriginalRequest->method());
+      resip_assert(msg->method()==mOriginalRequest->method());
       try
       {
          Processor::processor_action_t ret=Processor::Continue;
@@ -361,7 +352,7 @@ RequestContext::processRequestNonInviteTransaction(SipMessage* msg, bool origina
                            "unexpected request in a non-invite RequestContext";
             send(response);
          }
-         assert(0);
+         resip_assert(0);
       }
    }
 
@@ -371,7 +362,7 @@ RequestContext::processRequestNonInviteTransaction(SipMessage* msg, bool origina
 void
 RequestContext::processRequestAckTransaction(SipMessage* msg, bool original)
 {
-   assert(msg->isRequest());
+   resip_assert(msg->isRequest());
    if(msg->method()!=ACK)
    {
       // !bwc! Somebody collided with an ACK/200. Send a failure response.
@@ -426,7 +417,7 @@ RequestContext::processRequestAckTransaction(SipMessage* msg, bool original)
 void
 RequestContext::doPostRequestProcessing(SipMessage* msg, bool original)
 {
-   assert(msg->isRequest());
+   resip_assert(msg->isRequest());
    
    // .bwc. This is called after an incoming request is done processing. This
    // IS NOT called if the request-processor chain goes async, and IS NOT called
@@ -509,7 +500,7 @@ RequestContext::doPostRequestProcessing(SipMessage* msg, bool original)
 bool
 RequestContext::processResponseInviteTransaction(SipMessage* msg)
 {
-   assert(msg->isResponse());
+   resip_assert(msg->isResponse());
    
    bool doPostProcessing=false;
    resip::Data tid(msg->getTransactionId());
@@ -520,7 +511,7 @@ RequestContext::processResponseInviteTransaction(SipMessage* msg)
       {
          Processor::processor_action_t ret = Processor::Continue;
          ret = mResponseProcessorChain.process(*this);
-         assert(ret != Processor::WaitingForEvent);
+         resip_assert(ret != Processor::WaitingForEvent);
          
          if (ret == Processor::Continue)
          {
@@ -551,7 +542,7 @@ RequestContext::processResponseInviteTransaction(SipMessage* msg)
    else
    {
       // ?bwc? Is this possible?
-      assert(0);
+      resip_assert(0);
    }
    
    return doPostProcessing;
@@ -560,7 +551,7 @@ RequestContext::processResponseInviteTransaction(SipMessage* msg)
 bool
 RequestContext::processResponseNonInviteTransaction(SipMessage* msg)
 {
-   assert(msg->isResponse());
+   resip_assert(msg->isResponse());
    
    resip::Data tid(msg->getTransactionId());
    tid.lowercase();
@@ -571,7 +562,7 @@ RequestContext::processResponseNonInviteTransaction(SipMessage* msg)
       {
          Processor::processor_action_t ret = Processor::Continue;
          ret = mResponseProcessorChain.process(*this);
-         assert(ret != Processor::WaitingForEvent);
+         resip_assert(ret != Processor::WaitingForEvent);
          
          if (ret == Processor::Continue)
          {
@@ -598,7 +589,7 @@ RequestContext::processResponseNonInviteTransaction(SipMessage* msg)
    else
    {
       // ?bwc? Is this possible?
-      assert(0);
+      resip_assert(0);
    }
    
    return doPostProcessing;
@@ -645,8 +636,17 @@ RequestContext::doPostResponseProcessing(SipMessage* msg)
          << "a sip response (_not_ a NIT/408): all transactions are terminated,"
          << " but we have not sent a final response. (What happened here?) ");
 
-         // Send best response
-         mResponseContext.forwardBestResponse();
+         // Send best response if there is one - otherwise send 500
+         if(mResponseContext.mBestResponse.isResponse())
+         {
+            mResponseContext.forwardBestResponse();
+         }
+         else
+         {
+            resip::SipMessage response;
+            Helper::makeResponse(response, *mOriginalRequest, 500); 
+            sendResponse(response);
+         }
       }
    }
 }
@@ -902,7 +902,7 @@ RequestContext::postTimedMessage(std::auto_ptr<resip::ApplicationMessage> msg,in
 void
 RequestContext::postAck200Done()
 {
-   assert(mOriginalRequest->method()==ACK);
+   resip_assert(mOriginalRequest->method()==ACK);
    DebugLog(<<"Posting Ack200DoneMessage");
    // .bwc. This needs to have a timer attached to it. (We need to
    // wait until all potential retransmissions of the ACK/200 have
@@ -923,7 +923,7 @@ RequestContext::send(SipMessage& msg)
 void
 RequestContext::sendResponse(SipMessage& msg)
 {
-   assert (msg.isResponse());
+   resip_assert (msg.isResponse());
    
    // We can't respond to an ACK request - so just drop it and generate an Ack200DoneMessage so the request context
    // gets cleaned up properly
@@ -970,7 +970,7 @@ RequestContext::sendResponse(SipMessage& msg)
       DebugLog(<<"Ensuring orig tid matches tid of response: " <<
                msg.getTransactionId() << " == " <<
                mOriginalRequest->getTransactionId());
-      assert(msg.getTransactionId()==mOriginalRequest->getTransactionId());
+      resip_assert(msg.getTransactionId()==mOriginalRequest->getTransactionId());
       
       // .bwc. Provisionals are not final responses, and CANCEL/200 is not a final
       //response in this context.
@@ -1064,6 +1064,41 @@ NameAddr&
 RequestContext::getTopRoute()
 {
    return mTopRoute;
+}
+
+const resip::Data&
+RequestContext::getDigestRealm()
+{
+   // (1) Check Preferred Identity
+   if (mOriginalRequest->exists(h_PPreferredIdentities))
+   {
+      // !abr! Add this when we get a chance
+      // find the fist sip or sips P-Preferred-Identity header
+      // for (;;)
+      // {
+      //    if ((i->uri().scheme() == Symbols::SIP) || (i->uri().scheme() == Symbols::SIPS))
+      //    {
+      //       return i->uri().host();
+      //    }
+      // }
+   }
+
+   // (2) Check From domain
+   if (mProxy.isMyDomain(mOriginalRequest->header(h_From).uri().host()))
+   {
+      return mOriginalRequest->header(h_From).uri().host();
+   }
+
+   // (3) Check Top Route Header
+   if (mOriginalRequest->exists(h_Routes) &&
+         mOriginalRequest->header(h_Routes).size()!=0 &&
+         mOriginalRequest->header(h_Routes).front().isWellFormed())
+   {
+      // !abr! Add this when we get a chance
+   }
+
+   // (4) Punt: Use Request URI
+   return mOriginalRequest->header(h_RequestLine).uri().host();
 }
 
 EncodeStream&

@@ -2,6 +2,9 @@
 #define UDP_SERVER_HXX
 
 #include <asio.hpp>
+#ifdef USE_SSL
+#include <asio/ssl.hpp>
+#endif
 #include <string>
 #include <boost/noncopyable.hpp>
 #include "RequestHandler.hxx"
@@ -45,6 +48,10 @@ private:
 
    /// The handler for all incoming requests.
    RequestHandler& mRequestHandler;
+
+   // Stores the local address and port
+   asio::ip::address mLocalAddress;
+   unsigned short mLocalPort;
 
    /// The RFC3489 Alternate Server
    UdpServer* mAlternatePortUdpServer;

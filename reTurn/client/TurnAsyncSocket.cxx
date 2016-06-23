@@ -1,7 +1,6 @@
 #include "TurnAsyncSocket.hxx"
 #include "../AsyncSocketBase.hxx"
 #include "ErrorCode.hxx"
-#include <boost/bind.hpp>
 #include <rutil/WinLeakCheck.hxx>
 #include <rutil/Logger.hxx>
 #include "../ReTurnSubsystem.hxx"
@@ -139,7 +138,7 @@ TurnAsyncSocket::doBindRequest()
 void
 TurnAsyncSocket::connectivityCheck(const StunTuple& targetAddr, UInt32 peerRflxPriority, bool setIceControlling, bool setIceControlled, unsigned int numRetransmits, unsigned int retrans_iterval_ms)
 {
-   assert(setIceControlling || setIceControlled);
+   resip_assert(setIceControlling || setIceControlled);
    mIOService.dispatch(weak_bind<AsyncSocketBase, void()>(mAsyncSocketBase.shared_from_this(), boost::bind(&TurnAsyncSocket::doConnectivityCheck, this, new StunTuple(targetAddr.getTransportType(), targetAddr.getAddress(), targetAddr.getPort()), peerRflxPriority, setIceControlling, setIceControlled, numRetransmits, retrans_iterval_ms)));
 }
 
@@ -324,7 +323,7 @@ TurnAsyncSocket::doSetActiveDestination(const asio::ip::address& address, unsign
    {
       // No channel binding yet (ie. no data sent or received from remote peer) - so create one
       mActiveDestination = mChannelManager.createChannelBinding(remoteTuple);
-      assert(mActiveDestination);
+      resip_assert(mActiveDestination);
       doChannelBinding(*mActiveDestination);
    }
    DebugLog(<< "TurnAsyncSocket::doSetActiveDestination: Active Destination set to: " << remoteTuple);
@@ -729,7 +728,7 @@ TurnAsyncSocket::handleChannelBindResponse(StunMessage &request, StunMessage &re
 {
    if(response.mClass == StunMessage::StunClassSuccessResponse)
    {
-      assert(request.mHasTurnChannelNumber);
+      resip_assert(request.mHasTurnChannelNumber);
 
       RemotePeer* remotePeer = mChannelManager.findRemotePeerByChannel(request.mTurnChannelNumber);
       if(!remotePeer)
@@ -1054,6 +1053,15 @@ TurnAsyncSocket::doSendFramed(boost::shared_ptr<DataBuffer>& data)
    {
       sendToRemotePeer(*mActiveDestination, data);
    }
+   else if(mAsyncSocketBase.isConnected())
+   {
+      //DebugLog(<<"Sending to connected peer");
+      sendToUnframed(mAsyncSocketBase.getConnectedAddress(), mAsyncSocketBase.getConnectedPort(), data);
+   }
+   else
+   {
+      DebugLog(<<"no allocation, can't send!");
+   }
 }
 
 void 
@@ -1066,7 +1074,7 @@ TurnAsyncSocket::doSendToFramed(const asio::ip::address& address, unsigned short
    {
       // No remote peer yet (ie. no data sent or received from remote peer) - so create one
       remotePeer = mChannelManager.createChannelBinding(remoteTuple);
-      assert(remotePeer);
+      resip_assert(remotePeer);
       doChannelBinding(*remotePeer);
    }
    return sendToRemotePeer(*remotePeer, data);
@@ -1273,7 +1281,7 @@ TurnAsyncSocket::requestTimeout(UInt128 tid)
          if(mTurnAsyncSocketHandler) mTurnAsyncSocketHandler->onChannelBindFailure(getSocketDescriptor(), asio::error_code(reTurn::ResponseTimeout, asio::error::misc_category));
          break;
       default:
-         assert(false);
+         resip_assert(false);
       }
    }
 }
@@ -1318,7 +1326,7 @@ TurnAsyncSocket::startChannelBindingTimer(unsigned short channel)
    {
       std::pair<ChannelBindingTimerMap::iterator,bool> ret = 
          mChannelBindingTimers.insert(std::pair<unsigned short, asio::deadline_timer*>(channel, new asio::deadline_timer(mIOService)));
-      assert(ret.second);
+      resip_assert(ret.second);
       it = ret.first;
    }
    it->second->expires_from_now(boost::posix_time::seconds(TURN_CHANNEL_BINDING_REFRESH_SECONDS));  

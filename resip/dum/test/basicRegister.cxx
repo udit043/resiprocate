@@ -8,6 +8,7 @@
 #include "resip/dum/DialogUsageManager.hxx"
 #include "resip/dum/MasterProfile.hxx"
 #include "resip/dum/RegistrationHandler.hxx"
+#include "rutil/Time.hxx"
 #include "rutil/Log.hxx"
 #include "rutil/Logger.hxx"
 #include "rutil/Subsystem.hxx"
@@ -37,11 +38,7 @@ class ClientHandler : public ClientRegistrationHandler
 
          resipCerr << "Pausing before unregister" << endl;
          
-#ifdef WIN32
-         Sleep(2000);
-#else
-         sleep(5);
-#endif
+         sleepMs(2000);
          h->removeAll();
       }
 
@@ -97,13 +94,13 @@ main (int argc, char** argv)
    auto_ptr<ClientAuthManager> clientAuth(new ClientAuthManager);   
    ClientHandler clientHandler;
 
-   clientDum.addTransport(UDP, 0, V4);
-   // clientDum.addTransport(UDP, 0, V6);
-   clientDum.addTransport(TCP, 0, V4);
-   // clientDum.addTransport(TCP, 0, V6);
+   stack.addTransport(UDP, 0, V4);
+   // stack.addTransport(UDP, 0, V6);
+   stack.addTransport(TCP, 0, V4);
+   // stack.addTransport(TCP, 0, V6);
 #ifdef USE_SSL
-   clientDum.addTransport(TLS, 0, V4);
-   // clientDum.addTransport(TLS, 0, V6);
+   stack.addTransport(TLS, 0, V4);
+   // stack.addTransport(TLS, 0, V6);
 #endif
    clientDum.setMasterProfile(profile);
    clientDum.setClientRegistrationHandler(&clientHandler);

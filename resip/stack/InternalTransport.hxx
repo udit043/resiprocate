@@ -38,7 +38,8 @@ class InternalTransport : public Transport
                         const Data& interfaceObj,
                         AfterSocketCreationFuncPtr socketFunc = 0,
                         Compression &compression = Compression::Disabled,
-                        unsigned transportFlags = 0);
+                        unsigned transportFlags = 0,
+                        const Data& netNs = Data::Empty);
 
       virtual ~InternalTransport();
 
@@ -57,7 +58,7 @@ class InternalTransport : public Transport
       static Socket socket(TransportType type, IpVersion ipVer);
       void bind();
 
-      //used for epoll
+      //used for event loop
       virtual void setPollGrp(FdPollGrp *grp);
 
       // used for statistics

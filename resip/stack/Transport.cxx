@@ -38,8 +38,6 @@ Transport::Transport(Fifo<TransactionMessage>& rxFifo,
                      AfterSocketCreationFuncPtr socketFunc,
                      Compression &compression) :
    mTuple(address),
-   mHasRecordRoute(false),
-   mKey(0),
    mCongestionManager(0),
    mStateMachineFifo(rxFifo, 8),
    mShuttingDown(false),
@@ -48,6 +46,10 @@ Transport::Transport(Fifo<TransactionMessage>& rxFifo,
    mCompression(compression),
    mTransportFlags(0)
 {
+#ifdef USE_NETNS
+   // Needs to be implemented for NETNS
+   resip_assert(0);
+#endif
    mInterface = Tuple::inet_ntop(mTuple);
 }
 
@@ -58,11 +60,10 @@ Transport::Transport(Fifo<TransactionMessage>& rxFifo,
                      const Data& tlsDomain,
                      AfterSocketCreationFuncPtr socketFunc,
                      Compression &compression,
-                     unsigned transportFlags) :
+                     unsigned transportFlags,
+                     const Data& netNs) :
    mInterface(intfc),
-   mTuple(intfc, portNum, version),
-   mHasRecordRoute(false),
-   mKey(0),
+   mTuple(intfc, portNum, version, UNKNOWN_TRANSPORT, Data::Empty, netNs),
    mCongestionManager(0),
    mStateMachineFifo(rxFifo,8),
    mShuttingDown(false),
@@ -222,10 +223,19 @@ Transport::fail(const Data& tid, TransportFailure::FailureReason reason, int sub
    }
 }
 
+void 
+Transport::setTcpConnectState(const Data& tid, TcpConnectState::State state)
+{
+    if (!tid.empty())
+    {
+        mStateMachineFifo.add(new TcpConnectState(tid, state));
+    }
+}
+
 std::auto_ptr<SendData>
 Transport::makeSendData( const Tuple& dest, const Data& d, const Data& tid, const Data &sigcompId)
 {
-   assert(dest.getPort() != -1);
+   resip_assert(dest.getPort() != -1);
    std::auto_ptr<SendData> data(new SendData(dest, d, tid, sigcompId));
    return data;
 }
@@ -250,7 +260,7 @@ Transport::makeFailedResponse(const SipMessage& msg,
   DataStream encodeStream(encoded);
   errMsg->encode(encodeStream);
   encodeStream.flush();
-  assert(!encoded.empty());
+  resip_assert(!encoded.empty());
 
   InfoLog(<<"Sending response directly to " << dest << " : " << errMsg->brief() );
 
@@ -369,7 +379,7 @@ Transport::stampReceived(SipMessage* message)
    {
       const Tuple& tuple = message->getSource();
       Data received = Tuple::inet_ntop(tuple);
-	  if(message->const_header(h_Vias).front().sentHost() != received)  // only add if received address is different from sent-by in Via
+      if(message->const_header(h_Vias).front().sentHost() != received)  // only add if received address is different from sent-by in Via
       {
          message->header(h_Vias).front().param(p_received) = received;
       }
@@ -382,7 +392,6 @@ Transport::stampReceived(SipMessage* message)
    DebugLog (<< "incoming from: " << message->getSource());
    StackLog (<< endl << endl << *message);
 }
-
 
 bool
 Transport::basicCheck(const SipMessage& msg)
@@ -431,11 +440,16 @@ Transport::callSocketFunc(Socket sock)
 }
 
 void
-Transport::pushRxMsgUp(TransactionMessage* msg)
+Transport::pushRxMsgUp(SipMessage* message)
 {
-   mStateMachineFifo.add(msg);
-}
+   SipMessageLoggingHandler* handler = getSipMessageLoggingHandler();
+   if(handler)
+   {
+       handler->inboundMessage(message->getSource(), message->getReceivedTransportTuple(), *message);
+   }
 
+   mStateMachineFifo.add(message);
+}
 
 bool
 Transport::operator==(const Transport& rhs) const

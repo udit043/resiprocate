@@ -26,6 +26,7 @@
 #include "rutil/Inserter.hxx"
 #include "rutil/WinCompat.hxx"
 #include "rutil/WinLeakCheck.hxx"
+#include "rutil/Errdes.hxx"
 
 #define RESIPROCATE_SUBSYSTEM resip::Subsystem::DNS
 
@@ -56,7 +57,7 @@ DnsUtil::lookupARecords(const Data& host)
    struct hostent hostbuf; 
    char buffer[8192];
    ret = gethostbyname_r( host.c_str(), &hostbuf, buffer, sizeof(buffer), &result, &herrno);
-   assert (ret != ERANGE);
+   resip_assert (ret != ERANGE);
 #elif defined(__QNX__) || defined(__SUNPRO_CC)
    struct hostent hostbuf; 
    char buffer[8192];
@@ -67,7 +68,7 @@ DnsUtil::lookupARecords(const Data& host)
    result = gethostbyname( host.c_str() );
    ret = (result == 0);
 #else
-   assert(0);
+   resip_assert(0);
    return names;
 #endif
    
@@ -96,8 +97,8 @@ DnsUtil::lookupARecords(const Data& host)
    }
    else
    {
-      assert(result);
-      assert(result->h_length == 4);
+      resip_assert(result);
+      resip_assert(result->h_length == 4);
       char str[256];
       for (char** pptr = result->h_addr_list; *pptr != 0; pptr++)
       {
@@ -129,10 +130,12 @@ DnsUtil::getLocalHostName()
    if(!getLocalHostNameInitializerGate)
    {
       Lock lock(getLocalHostNameInitializerMutex);
-      char buffer[MAXHOSTNAMELEN];
+      char buffer[MAXHOSTNAMELEN + 1];
       initNetwork();
-      buffer[0] = '\0';
-      if (gethostname(buffer,sizeof(buffer)) == -1)
+      // can't assume the name is NUL terminated when truncation occurs,
+      // so insert trailing NUL here
+      buffer[0] = buffer[MAXHOSTNAMELEN] = '\0';
+      if (gethostname(buffer,sizeof(buffer)-1) == -1)
       {
          int err = getErrno();
          switch (err)
@@ -141,10 +144,10 @@ DnsUtil::getLocalHostName()
 //       current hack (see the #define in .hxx) needs
 //       to be reworked.
             case WSANOTINITIALISED:
-               CritLog( << "could not find local hostname because network not initialized:" << strerror(err) );
+               CritLog( << "could not find local hostname because network not initialized:" << strerror(err) << " error message from Errdes.hxx file : " << errortostringOS(err));
                break;
             default:
-               CritLog( << "could not find local hostname:" << strerror(err) );
+               CritLog( << "could not find local hostname:" << strerror(err) << " error message from Errdes.hxx file : " << errortostringOS(err));
                break;
          }
          throw Exception("could not find local hostname",__FILE__,__LINE__);
@@ -191,17 +194,20 @@ DnsUtil::getLocalDomainName()
    }
    else
    {
-#if defined( __APPLE__ ) || defined( WIN32 ) || defined(__SUNPRO_CC) || defined(__sun__)
+#if defined( __APPLE__ ) || defined( WIN32 ) || defined(__SUNPRO_CC) || defined(__sun__) || defined( __ANDROID__ )
       throw Exception("Could not find domainname in local hostname",__FILE__,__LINE__);
 #else
       DebugLog( << "No domain portion in hostname <" << lhn << ">, so using getdomainname");
-      char buffer[MAXHOSTNAMELEN];
-      if (int e = getdomainname(buffer,sizeof(buffer)) == -1)
+      char buffer[MAXHOSTNAMELEN + 1];
+      // can't assume the name is NUL terminated when truncation occurs,
+      // so insert trailing NUL here
+      buffer[0] = buffer[MAXHOSTNAMELEN] = '\0';
+      if (int e = getdomainname(buffer,sizeof(buffer)-1) == -1)
       {
          if ( e != 0 )
          {
             int err = getErrno();
-            CritLog(<< "Couldn't find domainname: " << strerror(err));
+            CritLog(<< "Couldn't find domainname: " << strerror(err)  << " error message from Errdes.hxx file : " << errortostringOS(err));
             throw Exception(strerror(err), __FILE__,__LINE__);
          }
       }
@@ -460,7 +466,7 @@ DnsUtil::getInterfaces(const Data& matching)
    struct ifconf ifc;
 
    int s = socket( AF_INET, SOCK_DGRAM, 0 );
-   assert( s != INVALID_SOCKET );	// can run out of file descs
+   resip_assert( s != INVALID_SOCKET );   // can run out of file descs
    const int len = 100 * sizeof(struct ifreq);
    int maxRet = 40;
 
@@ -552,10 +558,14 @@ DnsUtil::getInterfaces(const Data& matching)
          continue;
       }
       
-      if (  (name[0]<'A') || (name[0]>'z') ) // should never happen
+      if ( ( (name[0]<'A') || (name[0]>'z') )
+#if defined(__MACH__) && defined(__GNU__)   // for GNU HURD
+            && (name[0] != '/')
+#endif
+         ) // should never happen
       {  
          DebugLog (<< "  ignore because: name looks bogus");
-         assert(0);
+         resip_assert(0);
          continue;
       }
 
@@ -579,7 +589,7 @@ DnsUtil::getInterfaces(const Data& matching)
       return results;
    }
 #else
-   assert(0);
+   resip_assert(0);
 #endif
 #endif
 
@@ -668,14 +678,14 @@ const char * inet_ntop6(const u_char *src, char *dst, size_t size);
 //adapted from freebsd inet_ntop.c(1.12) and inet_pton.c(1.5) for windows(non-compliant snprinf workaround)
 /* const char *
  * inet_ntop4(src, dst, size)
- *	format an IPv4 address, more or less like inet_ntoa()
+ * format an IPv4 address, more or less like inet_ntoa()
  * return:
- *	`dst' (as a const)
+ * `dst' (as a const)
  * notes:
- *	(1) uses no statics
- *	(2) takes a u_char* not an in_addr as input
+ * (1) uses no statics
+ * (2) takes a u_char* not an in_addr as input
  * author:
- *	Paul Vixie, 1996.
+ * Paul Vixie, 1996.
  */
 const char *
 DnsUtil::inet_ntop(int af, const void * __restrict src, char * __restrict dst,
@@ -718,9 +728,9 @@ inet_ntop4(const u_char *src, char *dst, size_t size)
 #ifdef USE_IPV6
 /* const char *
  * inet_ntop6(src, dst, size)
- *	convert IPv6 binary address into presentation (printable) format
+ * convert IPv6 binary address into presentation (printable) format
  * author:
- *	Paul Vixie, 1996.
+ * Paul Vixie, 1996.
  */
 
 const char *
@@ -740,8 +750,8 @@ inet_ntop6(const u_char *src, char *dst, size_t size)
 
    /*
     * Preprocess:
-    *	Copy the input (bytewise) array into a wordwise array.
-    *	Find the longest run of 0x00's in src[] for :: shorthanding.
+    * Copy the input (bytewise) array into a wordwise array.
+    * Find the longest run of 0x00's in src[] for :: shorthanding.
     */
    memset(words, '\0', sizeof words);
    for (i = 0; i < NS_IN6ADDRSZ; i++)
@@ -811,21 +821,21 @@ inet_ntop6(const u_char *src, char *dst, size_t size)
    return (dst);
 }
 
-static int	inet_pton6(const char *src, u_char *dst);
+static int  inet_pton6(const char *src, u_char *dst);
 #endif //USE_IPV6
 
-static int	inet_pton4(const char *src, u_char *dst);
+static int  inet_pton4(const char *src, u_char *dst);
 
 /* int
  * inet_pton(af, src, dst)
- *	convert from presentation format (which usually means ASCII printable)
- *	to network format (which is usually some kind of binary format).
+ * convert from presentation format (which usually means ASCII printable)
+ * to network format (which is usually some kind of binary format).
  * return:
- *	1 if the address was valid for the specified address family
- *	0 if the address wasn't valid (`dst' is untouched in this case)
- *	-1 if some other error occurred (`dst' is untouched in this case, too)
+ * 1 if the address was valid for the specified address family
+ * 0 if the address wasn't valid (`dst' is untouched in this case)
+ * -1 if some other error occurred (`dst' is untouched in this case, too)
  * author:
- *	Paul Vixie, 1996.
+ * Paul Vixie, 1996.
  */
 int
 DnsUtil::inet_pton(int af, const char* src, void* dst)
@@ -846,13 +856,13 @@ DnsUtil::inet_pton(int af, const char* src, void* dst)
 
 /* int
  * inet_pton4(src, dst)
- *	like inet_aton() but without all the hexadecimal and shorthand.
+ * like inet_aton() but without all the hexadecimal and shorthand.
  * return:
- *	1 if `src' is a valid dotted quad, else 0.
+ * 1 if `src' is a valid dotted quad, else 0.
  * notice:
- *	does not touch `dst' unless it's returning 1.
+ * does not touch `dst' unless it's returning 1.
  * author:
- *	Paul Vixie, 1996.
+ * Paul Vixie, 1996.
  */
 static const char digits[] = "0123456789";
 static int
@@ -897,16 +907,16 @@ inet_pton4(const char *src, u_char *dst)
 
 /* int
  * inet_pton6(src, dst)
- *	convert presentation level address to network order binary form.
+ * convert presentation level address to network order binary form.
  * return:
- *	1 if `src' is a valid [RFC1884 2.2] address, else 0.
+ * 1 if `src' is a valid [RFC1884 2.2] address, else 0.
  * notice:
- *	(1) does not touch `dst' unless it's returning 1.
- *	(2) :: in a full address is silently ignored.
+ * (1) does not touch `dst' unless it's returning 1.
+ * (2) :: in a full address is silently ignored.
  * credit:
- *	inspired by Mark Andrews.
+ * inspired by Mark Andrews.
  * author:
- *	Paul Vixie, 1996.
+ * Paul Vixie, 1996.
  */
 static const char xdigits_l[] = "0123456789abcdef",
                   xdigits_u[] = "0123456789ABCDEF";
@@ -961,7 +971,7 @@ inet_pton6(const char *src, u_char *dst)
           inet_pton4(curtok, tp) > 0) {
          tp += NS_INADDRSZ;
          saw_xdigit = 0;
-         break;	/* '\0' was seen by inet_pton4(). */
+         break;   /* '\0' was seen by inet_pton4(). */
       }
       return (0);
    }

@@ -221,7 +221,8 @@ SipStackAndThread::SipStackAndThread(const char *tType,
    }
    else if ( strcmp(tType,"event")==0
           || strcmp(tType,"epoll")==0
-          || strcmp(tType,"fdset")==0 )
+          || strcmp(tType,"fdset")==0
+          || strcmp(tType,"poll")==0 )
    {
       mPollGrp = FdPollGrp::create(tType);
       mEventIntr = new EventThreadInterruptor(*mPollGrp);
@@ -346,7 +347,8 @@ struct StackThreadPair
 };
 
 bool
-StackThreadPair::wait(int& thisseltime) {
+StackThreadPair::wait(int& thisseltime) 
+{
    if(mReceiver.getStack().hasMessage() || mSender.getStack().hasMessage())
    {
       return false;
@@ -374,7 +376,7 @@ static void
 performTest(int verbose, int runs, int window, int invite,
       Data& bindIfAddr,
       int numPorts, int senderPort, int registrarPort, const char *proto,
-      int sendSleepUs,
+      int sendSleepMs,
       StackThreadPair& pair)
 {
    NameAddr target;
@@ -433,10 +435,10 @@ performTest(int verbose, int runs, int window, int invite,
          next = 0; // DON'T delete next; consumed by send above
          outstanding++;
          sent++;
-#ifndef WIN32
-         if (sendSleepUs>0)
-            usleep(sendSleepUs);
-#endif
+         if (sendSleepMs>0)
+         {
+            sleepMs(sendSleepMs);
+         }
       }
 
       int thisseltime = 0;
@@ -589,7 +591,7 @@ main(int argc, char* argv[])
    int portBase = 0;
    const char* threadType = "event";
    int tpFlags = 0;
-   int sendSleepUs = 0;
+   int sendSleepMs = 0;
    int cManager=0;
    int statisticsInterval=60;
 
@@ -615,7 +617,7 @@ main(int argc, char* argv[])
       {"numports",    'n', POPT_ARG_INT,    &numPorts,  0, "number of parallel sessions(ports)", 0},
       {"thread-type", 't', POPT_ARG_STRING, &threadType,0, "stack thread type", threadTypeDesc},
       {"tf",          0,   POPT_ARG_INT,    &tpFlags,   0, "bit encoding of transportFlags", 0},
-      {"sleep",       0,   POPT_ARG_INT,    &sendSleepUs,0, "time (us) to sleep after each sent request", 0},
+      {"sleep",       0,   POPT_ARG_INT,    &sendSleepMs,0, "time (ms) to sleep after each sent request", 0},
       {"use-congestion-manager",0, POPT_ARG_NONE, &cManager ,   0, "use a CongestionManager", 0},
       {"statistics-interval",       0,   POPT_ARG_INT,    &statisticsInterval,0, "time in seconds between statistics logging", 0},
       POPT_AUTOHELP
@@ -700,7 +702,9 @@ main(int argc, char* argv[])
 
    int senderPort = portBase;
    if ( senderPort==0 )
+   {
       senderPort = numPorts==1 ? 25060+(rand()&0x0fff) : 11000;
+   }
    int registrarPort = senderPort + numPorts;
 
    int idx;
@@ -786,7 +790,7 @@ main(int argc, char* argv[])
 
    performTest(verbose, runs, window, invite,
       bindIfAddr, numPorts, senderPort, registrarPort, proto,
-      sendSleepUs, pair);
+      sendSleepMs, pair);
 
    sender.shutdown();
    receiver.shutdown();

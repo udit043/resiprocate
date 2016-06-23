@@ -4,6 +4,8 @@
 
 #include "resip/stack/AbandonServerTransaction.hxx"
 #include "resip/stack/CancelClientInviteTransaction.hxx"
+#include "resip/stack/AddTransport.hxx"
+#include "resip/stack/RemoveTransport.hxx"
 #include "resip/stack/TerminateFlow.hxx"
 #include "resip/stack/EnableFlowTimer.hxx"
 #include "resip/stack/ZeroOutStatistics.hxx"
@@ -32,6 +34,7 @@
 #include "resip/stack/TuSelector.hxx"
 #include "resip/stack/InteropHelper.hxx"
 #include "resip/stack/KeepAliveMessage.hxx"
+#include "rutil/ResipAssert.h"
 #include "rutil/DnsUtil.hxx"
 #include "rutil/Logger.hxx"
 #include "rutil/MD5Stream.hxx"
@@ -43,7 +46,7 @@ using namespace resip;
 
 #define RESIPROCATE_SUBSYSTEM Subsystem::TRANSACTION
 
-unsigned long TransactionState::StatelessIdCounter = 0;
+UInt32 TransactionState::StatelessIdCounter = 0;
 
 TransactionState::TransactionState(TransactionController& controller, Machine m, 
                                    State s, const Data& id, MethodTypes method, const Data& methodText, TransactionUser* tu) : 
@@ -60,10 +63,11 @@ TransactionState::TransactionState(TransactionController& controller, Machine m,
    mCurrentMethodType(UNKNOWN),
    mCurrentResponseCode(0),
    mAckIsValid(false),
-   mWaitingForDnsResult(false),
+   mPendingOperation(None),
    mTransactionUser(tu),
    mFailureReason(TransportFailure::None),
-   mFailureSubCode(0)
+   mFailureSubCode(0),
+   mTcpConnectTimerStarted(false)
 {
    StackLog (<< "Creating new TransactionState: " << *this);
 }
@@ -108,7 +112,7 @@ TransactionState::handleInternalCancel(SipMessage* cancel,
 bool
 TransactionState::handleBadRequest(const resip::SipMessage& badReq, TransactionController& controller)
 {
-   assert(badReq.isRequest() && badReq.method() != ACK);
+   resip_assert(badReq.isRequest() && badReq.method() != ACK);
    try
    {
       SipMessage* error = Helper::makeResponse(badReq,400);
@@ -143,7 +147,7 @@ TransactionState::handleBadRequest(const resip::SipMessage& badReq, TransactionC
 
 TransactionState::~TransactionState()
 {
-   assert(mState != Bogus);
+   resip_assert(mState != Bogus);
 
    if (mDnsResult)
    {
@@ -260,7 +264,7 @@ TransactionState::processSipMessageAsNew(SipMessage* sip, TransactionController&
             }
             else
             {
-               assert(matchingInvite);
+               resip_assert(matchingInvite);
                TransactionState* state = TransactionState::makeCancelTransaction(matchingInvite, ServerNonInvite, tid);
                state->startServerNonInviteTimerTrying(*sip,tid);
                state->sendToTU(sip);
@@ -397,38 +401,33 @@ TransactionState::processSipMessageAsNew(SipMessage* sip, TransactionController&
 void
 TransactionState::process(TransactionController& controller, 
                            TransactionMessage* message)
-{
+{ 
+   // Note:  KeepAliveMessage is a special SipMessage - check for it first
+   KeepAliveMessage* keepAlive = dynamic_cast<KeepAliveMessage*>(message);
+   if (keepAlive)
    {
-      KeepAliveMessage* keepAlive = dynamic_cast<KeepAliveMessage*>(message);
-      if (keepAlive)
-      {
-         StackLog ( << "Sending keep alive to: " << keepAlive->getDestination());      
-         controller.mTransportSelector.transmit(keepAlive, keepAlive->getDestination());
-         delete keepAlive;
-         return;      
-      }
+      StackLog ( << "Sending keep alive to: " << keepAlive->getDestination());      
+      controller.mTransportSelector.transmit(keepAlive, keepAlive->getDestination());
+      delete keepAlive;
+      return;
+   }
 
-      ConnectionTerminated* term = dynamic_cast<ConnectionTerminated*>(message);
-      if (term)
-      {
-         if(term->hasTransactionUser())
-         {
-            controller.mTuSelector.add(term);
-         }
-         else
-         {
-            // .bwc. This means we are using this message to close a connection.
-            controller.mTransportSelector.closeConnection(term->getFlow());
-         }
-         delete term;
-         return;
-      }
-
+   SipMessage* sip = dynamic_cast<SipMessage*>(message);
+   if(!sip)
+   {
       KeepAlivePong* pong = dynamic_cast<KeepAlivePong*>(message);
       if (pong)
       {
          controller.mTuSelector.add(pong);
          delete pong;
+         return;
+      }
+
+      ConnectionTerminated* term = dynamic_cast<ConnectionTerminated*>(message);
+      if (term)
+      {
+         controller.mTuSelector.add(term);
+         delete term;
          return;
       }
 
@@ -463,6 +462,22 @@ TransactionState::process(TransactionController& controller,
          delete pollStatistics;
          return;
       }
+
+      AddTransport* addTransport = dynamic_cast<AddTransport*>(message);
+      if(addTransport)
+      {
+         controller.mTransportSelector.addTransport(addTransport->getTransport(), true /* isStackRunning */);
+         delete addTransport;
+         return;
+      }
+
+      RemoveTransport* removeTransport = dynamic_cast<RemoveTransport*>(message);
+      if(removeTransport)
+      {
+         controller.mTransportSelector.removeTransport(removeTransport->getTransportKey());
+         delete removeTransport;
+         return;
+      }
    }
    
    // .bwc. We can't do anything without a tid here. Check this first.
@@ -479,7 +494,6 @@ TransactionState::process(TransactionController& controller,
       return;
    }
    
-   SipMessage* sip = dynamic_cast<SipMessage*>(message);
    MethodTypes method = UNKNOWN;
 
    if(sip)
@@ -593,7 +607,8 @@ TransactionState::process(TransactionController& controller,
                // Overwrite tag.
                if(from.exists(p_tag))
                {
-                  if(sip->const_header(h_From).param(p_tag) != from.param(p_tag))
+                  if(!sip->const_header(h_From).exists(p_tag) ||
+                     sip->const_header(h_From).param(p_tag) != from.param(p_tag))
                   {
                      InfoLog(<<"Other end modified our local tag... correcting.");
                      sip->header(h_From).param(p_tag) = from.param(p_tag);
@@ -601,11 +616,8 @@ TransactionState::process(TransactionController& controller,
                }
                else if(sip->const_header(h_From).exists(p_tag))
                {
-                  if(sip->const_header(h_From).exists(p_tag))
-                  {
-                     InfoLog(<<"Other end added a local tag for us... removing.");
-                     sip->header(h_From).remove(p_tag);
-                  }
+                  InfoLog(<<"Other end added a local tag for us... removing.");
+                  sip->header(h_From).remove(p_tag);
                }
             }
             else
@@ -621,7 +633,8 @@ TransactionState::process(TransactionController& controller,
                // Overwrite tag.
                if(to.exists(p_tag))
                {
-                  if(sip->const_header(h_To).param(p_tag) != to.param(p_tag))
+                  if(!sip->const_header(h_To).exists(p_tag) ||
+                     sip->const_header(h_To).param(p_tag) != to.param(p_tag))
                   {
                      InfoLog(<<"Other end modified the (existing) remote tag... "
                                  "correcting.");
@@ -645,19 +658,10 @@ TransactionState::process(TransactionController& controller,
          if(state->mController.getFixBadCSeqNumbers())
          {
             unsigned int old=state->mNextTransmission->const_header(h_CSeq).sequence();
-            if(sip->const_header(h_CSeq).sequence()!=old)
+            if(sip->const_header(h_CSeq).sequence() != old)
             {
                InfoLog(<<"Other end changed our CSeq number... replacing.");
                sip->header(h_CSeq).sequence()=old;
-            }
-
-            if(state->mNextTransmission->exists(h_RAck))
-            {
-               if(!(sip->const_header(h_RAck)==state->mNextTransmission->const_header(h_RAck)))
-               {
-                  InfoLog(<<"Other end changed our RAck... replacing.");
-                  sip->header(h_RAck)=state->mNextTransmission->const_header(h_RAck);
-               }
             }
          }
       }
@@ -737,7 +741,7 @@ TransactionState::process(TransactionController& controller,
             break;
          case ClientInvite:
             // ACK from TU will be Stateless
-            assert (!sip || !(state->isFromTU(sip) &&  sip->isRequest() && method == ACK));
+            resip_assert (!sip || !(state->isFromTU(sip) &&  sip->isRequest() && method == ACK));
             state->processClientInvite(message);
             break;
          case ServerNonInvite:
@@ -757,7 +761,7 @@ TransactionState::process(TransactionController& controller,
             break;
          default:
             CritLog(<<"internal state error");
-            assert(0);
+            resip_assert(0);
             return;
       }
    }
@@ -864,7 +868,7 @@ TransactionState::processTimer(TransactionController& controller,
             break;
          default:
             CritLog(<<"internal state error");
-            assert(0);
+            resip_assert(0);
             return;
       }
    }
@@ -917,6 +921,12 @@ TransactionState::processStateless(TransactionMessage* message)
       delete message;
       delete this;
    }
+   else if (isTcpConnectState(message))
+   {
+       // stateless mode is not supported
+       //processTcpConnectState(message);
+       delete message;
+   }
    else if (isTimer(message))
    {
       TimerMessage* timer = dynamic_cast<TimerMessage*>(message);
@@ -928,7 +938,7 @@ TransactionState::processStateless(TransactionMessage* message)
       else
       {
          delete timer;
-         assert(0);
+         resip_assert(0);
       }
    }
    else if(dynamic_cast<DnsResultMessage*>(message))
@@ -944,7 +954,7 @@ TransactionState::processStateless(TransactionMessage* message)
    else
    {
       delete message;
-      assert(0);
+      resip_assert(0);
    }
 }
 
@@ -1024,7 +1034,7 @@ TransactionState::processClientNonInvite(TransactionMessage* msg)
          }
          else
          {
-            assert(0);
+            resip_assert(0);
             delete sip;
          }
          
@@ -1043,14 +1053,14 @@ TransactionState::processClientNonInvite(TransactionMessage* msg)
             {
                mDnsResult->destroy();
                mDnsResult=0;
-               mWaitingForDnsResult=false;
+               mPendingOperation=None;
             }
             resetNextTransmission(0);
          }
       }
       else
       {
-         assert(0);
+         resip_assert(0);
          delete sip;
       }
    }
@@ -1093,13 +1103,20 @@ TransactionState::processClientNonInvite(TransactionMessage* msg)
             }
             break;
 
+         case Timer::TcpConnectTimer:
+             if (!mTcpConnectTimerStarted) // Ignore timer if we we connected (note: when we connect we set mTcpConnectTimerStarted to false)
+             {
+                 delete msg;
+                 break;
+             }
+             // else fallthrough 
          case Timer::TimerF:
             if (mState == Trying || mState == Proceeding)
             {
                // !bwc! We hold onto this until we get a response from the wire
                // in client transactions, for this contingency.
-               assert(mNextTransmission);
-               if(mWaitingForDnsResult)
+               resip_assert(mNextTransmission);
+               if(mPendingOperation == Dns)
                {
                   WarningLog(<< "Transaction timed out while waiting for DNS "
                               "result uri=" << 
@@ -1132,6 +1149,11 @@ TransactionState::processClientNonInvite(TransactionMessage* msg)
    else if (isTransportError(msg))
    {
       processTransportFailure(msg);
+      delete msg;
+   }
+   else if (isTcpConnectState(msg))
+   {
+      processTcpConnectState(msg);
       delete msg;
    }
    else if(dynamic_cast<DnsResultMessage*>(msg))
@@ -1178,7 +1200,7 @@ TransactionState::processClientInvite(TransactionMessage* msg)
             break;
             
          case CANCEL:
-            assert(0);
+            resip_assert(0);
             delete msg;
             break;
 
@@ -1250,7 +1272,7 @@ TransactionState::processClientInvite(TransactionMessage* msg)
                {
                   mDnsResult->destroy();
                   mDnsResult=0;
-                  mWaitingForDnsResult=false;
+                  mPendingOperation=None;
                }
                StackLog (<< "Received 2xx on client invite transaction");
                StackLog (<< *this);
@@ -1272,7 +1294,7 @@ TransactionState::processClientInvite(TransactionMessage* msg)
                   resetNextTransmission(ack);
                   
                   // want to use the same transport as was selected for Invite
-                  assert(mTarget.getType() != UNKNOWN_TRANSPORT);
+                  resip_assert(mTarget.getType() != UNKNOWN_TRANSPORT);
                   sendCurrentToWire();
                   sendToTU(sip); // don't delete msg
                   terminateClientTransaction(mId);
@@ -1301,7 +1323,7 @@ TransactionState::processClientInvite(TransactionMessage* msg)
                      {
                         mDnsResult->destroy();
                         mDnsResult=0;
-                        mWaitingForDnsResult=false;
+                        mPendingOperation=None;
                      }
                      sendToTU(sip); // don't delete msg
                   }
@@ -1321,7 +1343,7 @@ TransactionState::processClientInvite(TransactionMessage* msg)
                      */
                      CritLog(  << "State invalid");
                      // !ah! syslog
-                     assert(0);
+                     resip_assert(0);
                      delete sip;
                   }
                }
@@ -1329,12 +1351,12 @@ TransactionState::processClientInvite(TransactionMessage* msg)
             else
             {
                delete sip;
-               assert(0);
+               resip_assert(0);
             }
             break;
             
          case CANCEL:
-            assert(0);
+            resip_assert(0);
             delete sip;
             break;
 
@@ -1366,12 +1388,19 @@ TransactionState::processClientInvite(TransactionMessage* msg)
             delete msg;
             break;
 
+         case Timer::TcpConnectTimer:
+             if (!mTcpConnectTimerStarted) // Ignore timer we we connected (note: when we connect we set mTcpConnectTimerStarted to false)
+             {
+                 delete msg;
+                 break;
+             }
+             // else fallthrough
          case Timer::TimerB:
             if (mState == Calling)
             {
-               assert(mNextTransmission && mNextTransmission->isRequest() &&
+               resip_assert(mNextTransmission && mNextTransmission->isRequest() &&
                         mNextTransmission->method()==INVITE);
-               if(mWaitingForDnsResult)
+               if(mPendingOperation == Dns)
                {
                   WarningLog(<< "Transaction timed out while waiting for DNS "
                               "result uri=" << 
@@ -1396,13 +1425,13 @@ TransactionState::processClientInvite(TransactionMessage* msg)
 
          case Timer::TimerCleanUp:
             // !ah! Cancelled Invite Cleanup Timer fired.
-            StackLog (<< "Timer::TimerCleanUp: " << *this << std::endl << *mNextTransmission);
             if (mState == Proceeding)
             {
-               assert(mNextTransmission && mNextTransmission->isRequest() && 
+               resip_assert(mNextTransmission && mNextTransmission->isRequest() && 
                         mNextTransmission->method() == INVITE);
+               StackLog (<< "Timer::TimerCleanUp: " << *this << std::endl << *mNextTransmission);
                InfoLog(<<"Making 408 for canceled invite that received no response: "<< mNextTransmission->brief());
-               if(mWaitingForDnsResult)
+               if(mPendingOperation == Dns)
                {
                   WarningLog(<< "Transaction timed out while waiting for DNS "
                               "result uri=" << 
@@ -1428,6 +1457,11 @@ TransactionState::processClientInvite(TransactionMessage* msg)
    {
       processTransportFailure(msg);
       delete msg;
+   }
+   else if (isTcpConnectState(msg))
+   {
+       processTcpConnectState(msg);
+       delete msg;
    }
    else if (isCancelClientTransaction(msg))
    {
@@ -1474,7 +1508,7 @@ TransactionState::processServerNonInvite(TransactionMessage* msg)
       {
          if(mIsAbandoned)
          {
-            assert(mState == Completed);
+            resip_assert(mState == Completed);
             mIsAbandoned=false;
             // put a 500 in mNextTransmission
             SipMessage* req = dynamic_cast<SipMessage*>(msg);
@@ -1500,7 +1534,7 @@ TransactionState::processServerNonInvite(TransactionMessage* msg)
          CritLog (<< "Fatal error in TransactionState::processServerNonInvite " 
                   << msg->brief()
                   << " state=" << *this);
-         assert(0);
+         resip_assert(0);
          delete msg;
          return;
       }
@@ -1555,7 +1589,7 @@ TransactionState::processServerNonInvite(TransactionMessage* msg)
                CritLog (<< "Fatal error in TransactionState::processServerNonInvite " 
                         << msg->brief()
                         << " state=" << *this);
-               assert(0);
+               resip_assert(0);
                delete sip;
                return;
             }
@@ -1570,7 +1604,7 @@ TransactionState::processServerNonInvite(TransactionMessage* msg)
    else if (isTimer(msg))
    {
       TimerMessage* timer = dynamic_cast<TimerMessage*>(msg);
-      assert(timer);
+      resip_assert(timer);
       switch (timer->getType())
       {
          case Timer::TimerJ:
@@ -1599,8 +1633,11 @@ TransactionState::processServerNonInvite(TransactionMessage* msg)
    }
    else if (isTransportError(msg))
    {
-      processTransportFailure(msg);
+      // Failed to send response - transport has likely been removed
+      WarningLog (<< "Failed to send response to server transaction (transport was likely removed)." << *this);
       delete msg;
+      terminateServerTransaction(mId);
+      delete this;
    }
    else if (isAbandonServerTransaction(msg))
    {
@@ -1732,7 +1769,7 @@ TransactionState::processServerInvite(TransactionMessage* msg)
             break;
 
          case CANCEL:
-            assert(0);
+            resip_assert(0);
             delete sip;
             break;
 
@@ -1839,7 +1876,7 @@ TransactionState::processServerInvite(TransactionMessage* msg)
             break;
             
          case CANCEL:
-            assert(0);
+            resip_assert(0);
             delete sip;
             break;
             
@@ -1898,15 +1935,18 @@ TransactionState::processServerInvite(TransactionMessage* msg)
             
          default:
             CritLog(<<"unexpected timer fired: " << timer->getType());
-            assert(0); // programming error if any other timer fires
+            resip_assert(0); // programming error if any other timer fires
             break;
       }
       delete timer;
    }
    else if (isTransportError(msg))
    {
-      processTransportFailure(msg);
+      // Failed to send response - transport has likely been removed
+      WarningLog (<< "Failed to send response to server transaction (transport was likely removed)." << *this);
       delete msg;
+      terminateServerTransaction(mId);
+      delete this;
    }
    else if (isAbandonServerTransaction(msg))
    {
@@ -1917,8 +1957,8 @@ TransactionState::processServerInvite(TransactionMessage* msg)
          {
             mMsgToRetransmit.clear();
             // hey, we had a 1xx laying around! Turn it into a 500 and send.
-            assert(mNextTransmission->isResponse());
-            assert(mNextTransmission->const_header(h_StatusLine).statusCode()/100==1);
+            resip_assert(mNextTransmission->isResponse());
+            resip_assert(mNextTransmission->const_header(h_StatusLine).statusCode()/100==1);
             mNextTransmission->header(h_StatusLine).statusCode()=500;
             mNextTransmission->header(h_StatusLine).reason()="Server Error";
             sendCurrentToWire();
@@ -1992,7 +2032,7 @@ TransactionState::processClientStale(TransactionMessage* msg)
    }
    else if(isResponse(msg, 200, 299))
    {
-      assert(isFromWire(msg));
+      resip_assert(isFromWire(msg));
       sendToTU(msg);
    }
    else if(dynamic_cast<DnsResultMessage*>(msg))
@@ -2051,7 +2091,7 @@ TransactionState::processServerStale(TransactionMessage* msg)
    {
       // .bwc. We should never fall into this block. There is code in process
       // that should prevent it.
-      assert(isFromWire(msg));
+      resip_assert(isFromWire(msg));
       InfoLog (<< "Passing ACK directly to TU: " << sip->brief());
       sendToTU(msg);
    }
@@ -2091,7 +2131,6 @@ TransactionState::processServerStale(TransactionMessage* msg)
    }
 }
 
-
 void
 TransactionState::processNoDnsResults()
 {
@@ -2112,7 +2151,7 @@ TransactionState::processNoDnsResults()
    if(mDnsResult)
    {
       InfoLog (<< "Ran out of dns entries for " << mDnsResult->target() << ". Send 503");
-      assert(mDnsResult->available() == DnsResult::Finished);
+      resip_assert(mDnsResult->available() == DnsResult::Finished);
       oDataStream warnText(warning.text());
       warnText << "No other DNS entries to try ("
                << mFailureReason << "," << mFailureSubCode << ")";
@@ -2180,8 +2219,12 @@ void
 TransactionState::processTransportFailure(TransactionMessage* msg)
 {
    TransportFailure* failure = dynamic_cast<TransportFailure*>(msg);
-   assert(failure);
-   assert(mState!=Bogus);
+   resip_assert(failure);
+   resip_assert(mState!=Bogus);
+
+   // We come here if the tcp connect timer expires, so we reset the flag incase we are
+   // going to try another DNS entry that is also TCP.
+   mTcpConnectTimerStarted = false;
 
    // Store failure reasons
    if (failure->getFailureReason() > mFailureReason)
@@ -2198,7 +2241,7 @@ TransactionState::processTransportFailure(TransactionMessage* msg)
    {
       WarningLog (<< "Failed to deliver a CANCEL request");
       StackLog (<< *this);
-      assert(mMethod==CANCEL);
+      resip_assert(mMethod==CANCEL);
 
       // In the case of a client-initiated CANCEL, we don't want to
       // try other transports in the case of transport error as the
@@ -2283,7 +2326,7 @@ TransactionState::processTransportFailure(TransactionMessage* msg)
       if(shouldFailover)
       {
          InfoLog (<< "Try sending request to a different dns result");
-         assert(mMethod!=CANCEL);
+         resip_assert(mMethod!=CANCEL);
 
          switch (mDnsResult->available())
          {
@@ -2298,7 +2341,7 @@ TransactionState::processTransportFailure(TransactionMessage* msg)
             
             case DnsResult::Pending:
                InfoLog(<< "We have a DNS query pending.");
-               mWaitingForDnsResult=true;
+               mPendingOperation=Dns;
                restoreOriginalContactAndVia();
                mMsgToRetransmit.clear();
                break;
@@ -2311,7 +2354,7 @@ TransactionState::processTransportFailure(TransactionMessage* msg)
             case DnsResult::Destroyed:
             default:
                InfoLog (<< "Bad state: " << *this);
-               assert(0);
+               resip_assert(0);
          }
       }
       else
@@ -2319,6 +2362,27 @@ TransactionState::processTransportFailure(TransactionMessage* msg)
          InfoLog(<< "Transport failure on send, and failover is disabled.");
          processNoDnsResults();
       }
+   }
+}
+
+void 
+TransactionState::processTcpConnectState(TransactionMessage* msg)
+{
+   TcpConnectState* tcpConnectState = dynamic_cast<TcpConnectState*>(msg);
+   resip_assert(tcpConnectState);
+
+   if (tcpConnectState->getState() == TcpConnectState::ConnectStarted &&
+       !mTcpConnectTimerStarted && Timer::TcpConnectTimeout != 0 &&
+       (mState == Trying || mState == Calling))
+   {
+      // Start Timer
+      mController.mTimers.add(Timer::TcpConnectTimer, mId, Timer::TcpConnectTimeout);
+      mTcpConnectTimerStarted = true;
+   }
+   else if (tcpConnectState->getState() == TcpConnectState::Connected &&
+       (mState == Trying || mState == Calling))
+   {
+      mTcpConnectTimerStarted = false;
    }
 }
 
@@ -2334,7 +2398,7 @@ TransactionState::rewriteRequest(const Uri& rewrite)
    // queue, and move all the code below into a function that handles that
    // message.
 
-   assert(mNextTransmission->isRequest());
+   resip_assert(mNextTransmission->isRequest());
    if (mNextTransmission->const_header(h_RequestLine).uri() != rewrite)
    {
       InfoLog (<< "Rewriting request-uri to " << rewrite);
@@ -2354,29 +2418,28 @@ TransactionState::handle(DnsResult* result)
 }
 
 void
-TransactionState::handleSync(DnsResult* result)
+TransactionState::handleSync(DnsResult* result)  // !slg! it is strange that we pass the result in here, then more or less ignore it in the method
 {
    StackLog (<< *this << " got DNS result: " << *result);
    
    // .bwc. Were we expecting something from mDnsResult?
-   if (mWaitingForDnsResult) 
+   if (mPendingOperation == Dns)
    {
-      assert(mDnsResult);
+      resip_assert(mDnsResult);
       switch (mDnsResult->available())
       {
          case DnsResult::Available:
-            mWaitingForDnsResult=false;
+            mPendingOperation=None;
             mTarget = mDnsResult->next();
-            assert( mTarget.transport==0 );
-            // below allows TU to which transport we send on
+            // below allows TU to know which transport we send on
             // (The Via mechanism for setting transport doesn't work for TLS)
-            mTarget.transport = mNextTransmission->getDestination().transport;
+            mTarget.mTransportKey = mNextTransmission->getDestination().mTransportKey;
             processReliability(mTarget.getType());
             sendCurrentToWire();
             break;
             
          case DnsResult::Finished:
-            mWaitingForDnsResult=false;
+            mPendingOperation=None;
             processNoDnsResults();
             break;
 
@@ -2385,7 +2448,7 @@ TransactionState::handleSync(DnsResult* result)
             
          case DnsResult::Destroyed:
          default:
-            assert(0);
+            resip_assert(0);
             break;
       }
    }
@@ -2485,13 +2548,13 @@ TransactionState::sendCurrentToWire()
    else if(mNextTransmission) // initial transmission; need to determine target
    {
       SipMessage* sip=mNextTransmission;
-      bool transmitted=false;
+      TransportSelector::TransmitState transmitState = TransportSelector::Unsent;
 
       if(isClient())
       {
          if(mTarget.getType() != UNKNOWN_TRANSPORT) // mTarget is set, so just send.
          {
-            transmitted=mController.mTransportSelector.transmit(
+            transmitState=mController.mTransportSelector.transmit(
                         sip, 
                         mTarget,
                         mIsReliable ? 0 : &mMsgToRetransmit);
@@ -2501,14 +2564,14 @@ TransactionState::sendCurrentToWire()
             if (sip->getDestination().mFlowKey) //...but sip->getDestination() will work
             {
                // ?bwc? Maybe we should be nice to the TU and do DNS in this case?
-               assert(sip->getDestination().getType() != UNKNOWN_TRANSPORT);
+               resip_assert(sip->getDestination().getType() != UNKNOWN_TRANSPORT);
 
                // .bwc. We have the FlowKey. This completely specifies our 
                // Transport (and Connection, if applicable). No DNS required.
                DebugLog(<< "Sending to tuple: " << sip->getDestination());
                mTarget = sip->getDestination();
                processReliability(mTarget.getType());
-               transmitted=mController.mTransportSelector.transmit(
+               transmitState=mController.mTransportSelector.transmit(
                            sip, 
                            mTarget,
                            mIsReliable ? 0 : &mMsgToRetransmit);
@@ -2518,10 +2581,10 @@ TransactionState::sendCurrentToWire()
                if(mDnsResult == 0) // ... and we haven't started a DNS query yet.
                {
                   StackLog (<< "sendToWire with no dns result: " << *this);
-                  assert(sip->isRequest());
-                  assert(mMethod!=CANCEL); // .bwc. mTarget should be set in this case.
+                  resip_assert(sip->isRequest());
+                  resip_assert(mMethod!=CANCEL); // .bwc. mTarget should be set in this case.
                   mDnsResult = mController.mTransportSelector.createDnsResult(this);
-                  mWaitingForDnsResult=true;
+                  mPendingOperation=Dns;
                   mController.mTransportSelector.dnsResolve(mDnsResult, sip);
                }
                else // ... but our DNS query isn't done yet.
@@ -2543,9 +2606,9 @@ TransactionState::sendCurrentToWire()
       }
       else // server transaction
       {
-         assert(mDnsResult == 0);
-         assert(sip->exists(h_Vias));
-         assert(!sip->const_header(h_Vias).empty());
+         resip_assert(mDnsResult == 0);
+         resip_assert(sip->exists(h_Vias));
+         resip_assert(!sip->const_header(h_Vias).empty());
 
          // .bwc. Code that tweaks mResponseTarget based on stuff in the SipMessage.
          // ?bwc? Why?
@@ -2556,9 +2619,9 @@ TransactionState::sendCurrentToWire()
             // mResponseTarget here? I don't think this has been thought out properly.
             Tuple target = simpleTupleForUri(sip->getForceTarget());
             StackLog(<<"!ah! response with force target going to : "<<target);
-            transmitted=mController.mTransportSelector.transmit(
+            transmitState=mController.mTransportSelector.transmit(
                         sip, 
-                        mTarget,
+                        target,
                         mIsReliable ? 0 : &mMsgToRetransmit);
          }
          else
@@ -2574,7 +2637,7 @@ TransactionState::sendCurrentToWire()
             }
    
             StackLog(<< "tid=" << sip->getTransactionId() << " sending to : " << mResponseTarget);
-            transmitted=mController.mTransportSelector.transmit(
+            transmitState=mController.mTransportSelector.transmit(
                         sip, 
                         mResponseTarget,
                         mIsReliable ? 0 : &mMsgToRetransmit);
@@ -2584,32 +2647,40 @@ TransactionState::sendCurrentToWire()
       // !bwc! If we don't have DNS results yet, or TransportSelector::transmit
       // fails, we hang on to the full original SipMessage, in the hope that 
       // next time it works.
-      if (transmitted)
+      if (transmitState == TransportSelector::Sent)
       {
-         if(mController.mStack.statisticsManagerEnabled())
-         {
-            mController.mStatsManager.sent(sip);
-         }
-
-         mCurrentMethodType = sip->method();
-         if(sip->isResponse())
-         {
-            mCurrentResponseCode = sip->const_header(h_StatusLine).statusCode();
-         }
-
-         // !bwc! If mNextTransmission is a non-ACK request, we need to save the
-         // initial request in case we need to send a simulated 408 or a 503 to 
-         // the TU (at least, until we get a response back)
-         if(!mNextTransmission->isRequest() || mNextTransmission->method()==ACK)
-         {
-            delete mNextTransmission;
-            mNextTransmission=0;
-         }
+         onSendSuccess();
       }
    }
    else
    {
-      assert(0);
+      resip_assert(0);
+   }
+}
+
+void
+TransactionState::onSendSuccess()
+{
+   SipMessage* sip=mNextTransmission;
+
+   if(mController.mStack.statisticsManagerEnabled())
+   {
+      mController.mStatsManager.sent(sip);
+   }
+
+   mCurrentMethodType = sip->method();
+   if(sip->isResponse())
+   {
+      mCurrentResponseCode = sip->const_header(h_StatusLine).statusCode();
+   }
+
+   // !bwc! If mNextTransmission is a non-ACK request, we need to save the
+   // initial request in case we need to send a simulated 408 or a 503 to
+   // the TU (at least, until we get a response back)
+   if(!mNextTransmission->isRequest() || mNextTransmission->method()==ACK)
+   {
+      delete mNextTransmission;
+      mNextTransmission=0;
    }
 }
 
@@ -2639,8 +2710,7 @@ TransactionState::sendToTU(TransactionMessage* msg)
             
             break;
          case 408:
-            if(sipMsg->getReceivedTransport() == 0 && 
-                  (mState == Trying || mState==Calling))  // only greylist if internally generated and we haven't received any responses yet
+            if(!sipMsg->isFromWire() && (mState == Trying || mState==Calling))  // only greylist if internally generated and we haven't received any responses yet
             {
                // greylist last target.
                // ?bwc? How long do we greylist this for? Probably should make
@@ -2663,7 +2733,7 @@ TransactionState::sendToTU(TransactionMessage* msg)
    {
       if(sipMsg)
       {
-         assert(sipMsg->isExternal());
+         resip_assert(sipMsg->isExternal());
          if(sipMsg->isRequest())
          {
             // .bwc. This could be an initial request, or an ACK/200.
@@ -2817,6 +2887,12 @@ TransactionState::isTransportError(TransactionMessage* msg) const
    return dynamic_cast<TransportFailure*>(msg) != 0;
 }
 
+bool
+TransactionState::isTcpConnectState(TransactionMessage* msg) const
+{
+    return dynamic_cast<TcpConnectState*>(msg) != 0;
+}
+
 bool 
 TransactionState::isAbandonServerTransaction(TransactionMessage* msg) const
 {
@@ -2833,9 +2909,9 @@ TransactionState::isCancelClientTransaction(TransactionMessage* msg) const
 const Data&
 TransactionState::tid(SipMessage* sip) const
 {
-   assert(0);
-   assert (mMachine != Stateless || (mMachine == Stateless && !mId.empty()));
-   assert (mMachine == Stateless || (mMachine != Stateless && sip));
+   resip_assert(0);
+   resip_assert (mMachine != Stateless || (mMachine == Stateless && !mId.empty()));
+   resip_assert (mMachine == Stateless || (mMachine != Stateless && sip));
    return (mId.empty() && sip) ? sip->getTransactionId() : mId;
 }
 
@@ -2878,7 +2954,7 @@ TransactionState::isClient() const
       case ServerStale:
          return false;
       default:
-         assert(0);
+         resip_assert(0);
    }
    return false;
 }

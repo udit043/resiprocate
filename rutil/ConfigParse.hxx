@@ -1,6 +1,7 @@
 #if !defined(ConfigParse_hxx)
 #define ConfigParse_hxx
 
+#include <set>
 #include <vector>
 #include "rutil/BaseException.hxx"
 #include "rutil/HashMap.hxx"
@@ -11,6 +12,8 @@ namespace resip
 
 class ConfigParse
 {
+private:
+   class NestedConfigParse;
 public:
    class Exception : public BaseException
    {
@@ -35,6 +38,8 @@ public:
 
    virtual void printHelpText(int argc, char **argv) = 0;
 
+   void getConfigIndexKeys(const resip::Data& indexName, std::set<resip::Data>& keys);
+
    bool getConfigValue(const resip::Data& name, resip::Data &value);
    resip::Data getConfigData(const resip::Data& name, const resip::Data& defaultValue, bool useDefaultIfEmpty=false);
 
@@ -51,11 +56,22 @@ public:
    unsigned short getConfigUnsignedShort(const resip::Data& name, int defaultValue);
 
    bool getConfigValue(const resip::Data& name, std::vector<resip::Data> &value);
-   
-protected:
+   bool getConfigValue(const resip::Data& name, std::set<resip::Data> &value);
+
+   typedef HashMap<int, NestedConfigParse> NestedConfigMap;
+   NestedConfigMap getConfigNested(const resip::Data& mapsPrefix);
+
+   bool AddBasePathIfRequired(Data& filename);
+
    void insertConfigValue(const resip::Data& name, const resip::Data& value);
 
+protected:
    typedef HashMultiMap<resip::Data, resip::Data> ConfigValuesMap;
+
+   void insertConfigValue(const Data& source, ConfigValuesMap& configValues, const resip::Data& name, const resip::Data& value);
+
+   ConfigValuesMap mCmdLineConfigValues;
+   ConfigValuesMap mFileConfigValues;
    ConfigValuesMap mConfigValues;
 
    resip::Data removePath(const resip::Data& fileAndPath);
@@ -63,8 +79,17 @@ protected:
    // Config filename from command line
    resip::Data mCmdLineConfigFilename;
 
+   resip::Data mConfigBasePath;
+
 private:
    friend EncodeStream& operator<<(EncodeStream& strm, const ConfigParse& config);
+};
+
+class ConfigParse::NestedConfigParse : public ConfigParse
+{
+public:
+   NestedConfigParse() {};
+   virtual void printHelpText(int argc, char **argv) {};
 };
 
 EncodeStream& operator<<(EncodeStream& strm, const ConfigParse& config);

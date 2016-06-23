@@ -9,9 +9,12 @@
 
 # Logging Type: syslog|cerr|cout|file
 # Note:  Logging to cout can negatively effect performance.
-#        When repro is placed into production 'file' or 
+#        When repro is placed into production 'file' or
 #        'syslog' should be used.
 LoggingType = cout
+
+# For syslog, also specify the facility, default is LOG_DAEMON
+SyslogFacility = LOG_DAEMON
 
 # Logging level: NONE|CRIT|ERR|WARNING|INFO|DEBUG|STACK
 LogLevel = INFO
@@ -25,11 +28,24 @@ LogFileMaxBytes = 5242880
 # Instance name to be shown in logs, very useful when multiple instances
 # logging to syslog concurrently
 # If unspecified, defaults to argv[0] (name of the executable)
-#LoggingInstanceName repro-dev
+#LoggingInstanceName = repro-dev
+
+# Enable INFO level SIP Message Logging - outputs all SIP messages
+# sent and/or received to log file in an easy to read format
+EnableSipMessageLogging = false
 
 ########################################################
 # Transport settings
 ########################################################
+
+# Set an upper limit on the maximum size of a SIP message payload
+# that the stack will accept.  If a payload received over a
+# connection-oriented transport exceeds this size, the
+# connection will be dropped.
+# This applies to TCP, TLS and WebSocket transports.
+# UDP payload sizes are limited by the maximum datagram size
+# and any fragmentation constraints.
+#StreamMessageSizeLimit = 65536
 
 # Local IP Address to bind SIP transports to. If left blank
 # repro will bind to all adapters.
@@ -50,13 +66,26 @@ TLSPort = 0
 WSPort = 80
  
 # Local port to listen on for SIP messages over WSS (WebSocket TLS) - 0 to disable
-WSSPort = 443
+WSSPort = 0
 
 # Local port to listen on for SIP messages over DTLS - 0 to disable
 DTLSPort = 0
 
 # TLS domain name for this server (note: domain cert for this domain must be present)
 TLSDomainName =
+
+# PEM-encoded X.509 certificate for TLS
+# Must contain any intermediate certificates from the CA
+# The TLSCertificate and TLSPrivateKey parameters are optional.  The stack
+# will also try to automatically detect any suitable certificates
+# in the directory specified by CertificatePath
+TLSCertificate = 
+
+# PEM-encoded private key for TLS
+TLSPrivateKey = 
+
+# Private key pass phrase if private keys are encrypted with a password
+TLSPrivateKeyPassPhrase =
 
 # Whether or not we ask for (Optional) or expect (Mandatory) TLS
 # clients to present a client certificate
@@ -70,6 +99,35 @@ TLSDomainName =
 #    SIP messages coming from the peer
 TLSClientVerification = None
 
+# The SSL or TLS connection mode to use
+# SSL v2 and v3 are deprecated and SSL v2 is particularly insecure
+# and should be avoided.
+# TLSv1 was the default up to and including reSIProcate v1.9.7.
+# With the setting TLSv1, only TLS v1.0 could be used
+# and not TLS v1.1 or newer versions.
+# The value SSLv23 works as a catch-all and gives the potential
+# to allow all the SSL and TLS versions.  Despite the name SSLv23, it
+# does not allow SSL v2.0 or v3.0 if the SSL_CTX_set_options method is used
+# to prohibit them or if OpenSSL is compiled without them.
+# See the page https://www.openssl.org/docs/ssl/SSL_CTX_new.html
+# for a more detailed discussion of how repro will behave when
+# using the values SSLv23 or TLSv1 here.
+# For optimal security and compatibility, set SSLv23 here and make sure
+# that either your OpenSSL is compiled without legacy SSL versions or
+# that the parameter OpenSSLCTXSetOptions (later in repro.config)
+# contains the values SSL_OP_NO_SSLv2 and SSL_OP_NO_SSLv3
+#
+#        TLSConnectionMethod          Supported
+#              value                  protocol
+#    ---------------------------------------------------
+#
+#            SSLv23                  TLS 1.0, 1.1, 1.2 and beyond
+#                                      negotiated dynamically
+#
+#            TLSv1                   Only TLS 1.0 (problematic)
+#
+TLSConnectionMethod = SSLv23
+
 # Whether we accept the subjectAltName email address as if it was a SIP
 # address (when checking the validity of a client certificate)
 # Very few commercial CAs offer support for SIP addresses in subjectAltName
@@ -79,6 +137,21 @@ TLSClientVerification = None
 # not just for connections from the local users.
 TLSUseEmailAsSIP = false
 
+# TLS Diffie-Hellman (DH) parameters file (optional)
+#
+# If specified, Diffie-Hellman can be used to enable
+# Perfect Forward Secrecy (PFS) in those cases where the SIP proxy
+# is acting as a TLS server and when the client tries to use a crypto suite
+# involving Diffie-Hellman.
+# The SIP proxy also supports ECDH regardless of whether a DH parameter file
+# is available.
+#
+# The file can be generated with the command:
+#
+#     openssl dhparam -outform PEM -out dh2048.pem 2048
+#
+TlsDHParamsFilename = dh2048.pem
+
 # Alternate and more flexible method to specify transports to bind to.  If specified here
 # then IPAddress, and port settings above are ignored.
 # Transports MUST be numbered in sequential order, starting from 1.  Possible settings are:
@@ -86,8 +159,13 @@ TLSUseEmailAsSIP = false
 #                                                IP Address and Port - square bracket notation
 #                                                is not used.
 # Transport<Num>Type = <'TCP'|'UDP'|'TLS'|'DTLS'|'WS'|'WSS'> - default is UDP if missing
-# Transport<Num>TlsDomain = <TLSDomain> - only required if transport is TLS or DTLS
+# Transport<Num>TlsDomain = <TLSDomain> - only required if transport is TLS, DTLS or WSS
+# Transport<Num>TlsCertificate = <TLSCertificate> - only for TLS, DTLS or WSS
+# Transport<Num>TlsPrivateKey = <TLSPrivateKey> - only for TLS, DTLS or WSS
+# Transport<Num>TlsPrivatePassPhrase = <TLSPrivateKeyPassPhrase> - only for TLS, DTLS or WSS
+#                                                                  when private key has passwd
 # Transport<Num>TlsClientVerification = <'None'|'Optional'|'Mandatory'> - default is None
+# Transport<Num>TlsConnectionMethod = <'TLSv1'|'SSLv23'> - default is SSLv23
 # Transport<Num>RecordRouteUri = <'auto'|URI> - if set to auto then record route URI
 #                                               is automatically generated from the other
 #                                               transport settings.  Otherwise explicity
@@ -112,6 +190,9 @@ TLSUseEmailAsSIP = false
 # Transport3Interface = 192.168.1.106:5061
 # Transport3Type = TLS
 # Transport3TlsDomain = sipdomain.com
+# Transport3TlsCertificate = /etc/ssl/crt/sipdomain.com.crt
+# Transport3TlsPrivateKey = /etc/ssl/private/sipdomain.com.key
+# Transport3TlsPrivateKeyPassPhrase = password
 # Transport3TlsClientVerification = Mandatory
 # Transport3RecordRouteUri = sip:h1.sipdomain.com;transport=TLS
 #
@@ -119,30 +200,29 @@ TLSUseEmailAsSIP = false
 # Transport4Type = UDP
 # Transport4RecordRouteUri = auto
 
-Transport1Interface = 192.168.1.2:5062
-Transport1Type = WS
-Transport1RecordRouteUri = auto
+# Transport5Interface = 192.168.1.106:5062
+# Transport5Type = WS
+# Transport5RecordRouteUri = auto
 
-Transport2Interface = 192.168.1.2:5060
-Transport2Type = TCP
-Transport2RecordRouteUri = auto
-
-Transport3Interface = 192.168.1.2:5063
-Transport3Type = WSS
-Transport3RecordRouteUri = auto
-Transport3TlsDomain = sipdomain.com
-Transport3TlsClientVerification = None
-Transport3RecordRouteUri = sip:sipdomain.com;transport=WS
+# Transport6Interface = 192.168.1.106:5063
+# Transport6Type = WSS
+# Transport6TlsDomain = sipdomain.com
+# Transport6TlsClientVerification = None
+# Transport6RecordRouteUri = sip:h1.sipdomain.com;transport=WS
 
 # Comma separated list of DNS servers, overrides default OS detected list (leave blank 
 # for default)
 DNSServers =
 
 # Enable IPv6
-EnableIPv6 = false
+EnableIPv6 = true
 
 # Enable IPv4
 DisableIPv4 = false
+
+# Comma separated list of IP addresses used for binding the HTTP configuration interface
+# and/or certificate server. If left blank it will bind to all adapters.
+HttpBindAddress =
 
 # Port on which to run the HTTP configuration interface and/or certificate server 
 # 0 to disable (default: 5080)
@@ -151,25 +231,88 @@ HttpPort = 5080
 # disable HTTP challenges for web based configuration GUI
 DisableHttpAuth = false
 
-# Web administrator password
-HttpAdminPassword = admin
+# Realm to use for HTTP admin interface digest authentication
+HttpAdminRealm = repro
 
-# Port on which to listen for and send XML RPC messaging used in command processing 
+# File containing user/password details
+#
+# The format is:
+#
+#   username:realm:HA1
+#
+# where
+#
+#   user = admin
+#   realm = the value from HttpAdminRealm
+#   HA1 = `echo -n user:realm:password | md5sum`
+#
+# You can use the htdigest utility from Apache to create and
+# manage this file
+#
+HttpAdminUserFile = users.txt
+
+# Comma separated list of IP addresses used for binding the Command Server listeners.
+# If left blank it will bind to all adapters.
+CommandBindAddress =
+
+# Port on which to listen for and send XML RPC messaging used in command processing
 # 0 to disable (default: 5081)
 CommandPort = 5081
 
-# Port on which to listen for and send XML RPC messaging used in registration sync 
+# Port on which to listen for and send XML RPC messaging used in registration/publication sync
 # process - 0 to disable (default: 0)
 RegSyncPort = 0
+
+# Port on which to connect to RegSync peer for registration/publication sync
+# process - 0 to use same value RegSyncPort (default: 0)
+RemoteRegSyncPort = 0
 
 # Hostname/ip address of another instance of repro to synchronize registrations with 
 # (note xmlrpcport must also be specified)
 RegSyncPeer =
 
+# Enable Publication Syncronization - Currently only applies to Presence Publications
+# Requires RegSyncPort to be specified
+EnablePublicationRepication = true
+
+# Non-outbound connections over this age (expressed in seconds) are
+# considered eligible for garbage collection.
+# If not set but FlowTimer is set, then this value defaults to 7200 seconds
+# Otherwise, there is no garbage collection at all unless an error occurs
+# when making an outgoing connection.
+#TCPConnectionGCAge =
+
+# File descriptor headroom threshold for emergency garbage collection
+# If the difference between the number of permitted FDs
+# (reported by periodic calls to getrlimit()) and the number
+# of active stream connections falls below this threshold,
+# the garbage collector will overlook TCPConnectionGCAge and
+# FlowTimer settings and more aggressively close connections
+# By default, this feature is not enabled
+# Remember that the value must be high enough to allow file descriptors
+# for each shared library that is open, each database connection,
+# each listening socket and any sockets/files accessed by plugins
+#TCPMinimumGCHeadroom =
 
 ########################################################
 # Misc settings
 ########################################################
+
+# Directory where plugins are located
+# The default is determined at build time depending upon the
+# target environment and the installation prefix passed to
+# the configure script
+#PluginDirectory = /usr/lib/repro/plugins
+
+# List of plugins to load (comma-separated list)
+# These are the names of the plugins and not the full filenames
+# Order is important: the plugins will always be loaded and
+# initialized in the order specified here
+# Plugins are not supported on all platforms and plugin support is an
+# optional feature that must be enabled at compile time.
+#
+# For example, to load  the plugin named "example", which is in libexample.so:
+#LoadPlugins = example
 
 # Drop privileges and run as some other user and group
 # If RunAsUser is specified and RunAsGroup is not specified,
@@ -187,16 +330,15 @@ Daemonize = false
 # if unspecified, no attempt will be made to create a PID file
 #PidFile = /var/run/repro/repro.pid
 
-# Path to load certificates from (default:  "$(HOME)/.sipCerts on *nix, and c:\sipCerts 
-# on windows)
-# Note that repro loads ALL root certificates found by the settings
-# CertificatePath, CADirectory and CAFile.  Setting one option does
-# not disable the other options.
-# Certificates in this location have to match one of the filename
-# patterns expected by the legacy reSIProcate SSL code:
-#   domain_cert_NAME.pem, root_cert_NAME.pem, ...
-CertificatePath =
-
+# Path to load certificates from (optional, there is no default)
+# Note that repro loads ALL root certificates found by any of the settings
+#
+#    CADirectory
+#    CAFile
+#    CertificatePath
+#
+# Setting one option does not disable the other options.
+#
 # Path to load root certificates from
 # Iff this directory is specified, all files in the directory
 # will be loaded as root certificates, prefixes and suffixes are
@@ -205,6 +347,7 @@ CertificatePath =
 # CertificatePath, CADirectory and CAFile.  Setting one option does
 # not disable the other options.
 # On Debian, the typical location is /etc/ssl/certs
+# On Red Hat/CentOS, there isn't a directory like this.
 #CADirectory = /etc/ssl/certs
 
 # Specify a single file containing one or more root certificates
@@ -212,75 +355,137 @@ CertificatePath =
 # Iff this filename is specified, the certificates in the file will
 # be loaded as root certificates
 #
-# This does NOT currently support bundles of unrelated root certificates
-# stored in the same PEM file, it ONLY supports related/chained root
-# certificates.  If multiple roots must be supported, use the CADirectory
-# option.
-#
-# In the future, this behavior may change to load a bundle,
-# such as /etc/ssl/certs/ca-certificates.txt on Debian and
+# This option is typically used to load a bundle of certificates
+# such as /etc/ssl/certs/ca-certificates.crt on Debian and
 # /etc/pki/tls/cert.pem on Red Hat/CentOS
 #
 # Note that repro loads ALL root certificates found by the settings
 # CertificatePath, CADirectory and CAFile.  Setting one option does
 # not disable the other options.
 #
-# This example loads just the CACert.org chain, which typically
-# includes the class 1 root and the class 3 root (signed by the class 1 root)
-#CAFile = /etc/ssl/certs/cacert.org.pem
+# Uncomment for Debian/Ubuntu:
+#CAFile = /etc/ssl/certs/ca-certificates.crt
+# Uncomment for Fedora, Red Hat, CentOS:
+#CAFile = /etc/pki/tls/cert.pem
 
-# The Path to read and write Berkely DB database files
-DatabasePath = ./
+# Certificates in this location have to match one of the filename
+# patterns expected by the legacy reSIProcate SSL code:
+#
+#   domain_cert_NAME.pem, root_cert_NAME.pem, ...
+#
+# For domain certificates, it is recommended to use the options
+# for individual transports, such as TransportXTlsCertificate and
+# TransportXTlsPrivateKey and not set CertificatePath at all.
+#
+CertificatePath =
 
-# The hostname running MySQL server to connect to, leave blank to use BerkelyDB.
+# This option specifies flags to be passed to OpenSSL's
+# SSL_CTX_set_options method after creating the SSL context
+# for a transport.
+#
+# The flags here are added (logical OR) to any existing flags already
+# set by default within the OpenSSL stack.
+#
+# By default, the reSIProcate stack adds flags SSL_OP_NO_SSLv2
+# and SSL_OP_NO_SSLv3 which disable deprecated and insecure
+# SSL versions.  To add more flags, uncomment the line below and add
+# the flags required, separated by commas.
+#OpenSSLCTXSetOptions = SSL_OP_NO_SSLv2, SSL_OP_NO_SSLv3
+
+# This option specifies flags to be passed to OpenSSL's
+# SSL_CTX_clear_options method after creating the SSL context
+# for a transport.
+#
+# The flags here are removed from any existing flags
+# already set by default within the OpenSSL stack.
+#
+# To clear the option SSL_OP_NO_SSLv3 and get SSLv3 support
+# (not recommended for security reasons), uncomment the example below:
+#OpenSSLCTXClearOptions = SSL_OP_NO_SSLv3
+
+# This parameter specifies the cipher list to be passed to
+# SSL_CTX_set_cipher_list.
+# The default value is defined in the code as BaseSecurity::StrongestSuite
+# using the value HIGH:-COMPLEMENTOFDEFAULT
+# Uncomment the line below and add or remove cipher names as required.
+# See https://www.openssl.org/docs/apps/ciphers.html for details
+# of the format of this parameter.
+#OpenSSLCipherList = HIGH:-COMPLEMENTOFDEFAULT
+#
+# and a weaker cipher list suitable for US export and compatibility with older devices:
+#OpenSSLCipherList = HIGH:RC4-SHA:-COMPLEMENTOFDEFAULT
+
+# Define database connections
+# Databases can be file based, SQL based or something else.
+# Multiple databases can be defined, the definitions are indexed, just
+# like the advanced transport configuration.
+# The only mandatory argument is the Database Type parameter.
+# Supported types:
+#
+#     BerkeleyDB        the traditional *.db files
+#     MySQL             a MySQL database
+#     PostgreSQL        a PostgreSQL database
+#
+# Other parts of the configuration can refer to the databases by their
+# index number.
+
+# Declare which Database definition is the default:
+DefaultDatabase = 1
+
+# Defines a BerkeleyDB storing the files in Database1Path:
+Database1Type = BerkeleyDB
+Database1Path = ./
+
+# Alternatively, define an SQL database
+#
+# WARNING: repro must be compiled with the USE_MYSQL or USE_POSTGRESQL flags
+# for this to work.
+#
+#Database1Type = MySQL
+#Database1Type = PostgreSQL
+
+# A PostgreSQL conninfo string, leave blank if you prefer to specify the
+# hostname, port and other details individually.  repro will combine
+# the conninfo string you specify here (if any) with individual details
+# you specify using the Host, Port, DatabaseName, Username and Password
+# to create the complete conninfo string used for the connection.
+# You may want to leave all the other parameters blank and just specify
+# a conninfo string.  You can also choose to leave the password out of
+# the conninfo string and include it from another file with restricted
+# read permissions.  If you specify a password as part of the conninfo
+# string it may appear in logs, if you specify it using the Password
+# parameter then it should be suppressed in logs.
+#Database1ConnInfo = host=localhost port=5432 dbname=repro user=repro
+
+# The hostname running SQL server to connect to, leave blank to use BerkelyDB.
 # The value of host may be either a host name or an IP address. If host is "localhost",
 # a connection to the local host is assumed. For Windows, the client connects using a
 # shared-memory connection, if the server has shared-memory connections enabled. Otherwise,
 # TCP/IP is used. For Unix, the client connects using a Unix socket file. For a host value of
 # "." on Windows, the client connects using a named pipe, if the server has named-pipe
 # connections enabled. If named-pipe connections are not enabled, an error occurs.
-# WARNING: repro must be compiled with the USE_MYSQL flag in order for this work.
-MySQLServer =
+#Database1Host = localhost
 
-# The MySQL login ID to use when connecting to the MySQL Server. If user is empty string "",
+# The SQL login ID to use when connecting to the SQL server. If user is empty string "",
 # the current user is assumed. Under Unix, this is the current login name. Under Windows,
 # the current user name must be specified explicitly.
-MySQLUser = root
+#Database1User = repro
 
-# The password for the MySQL login ID specified.
-MySQLPassword = root
+# The password for the SQL login ID specified.
+#Database1Password = repro
 
-# The database name on the MySQL server that contains the repro tables
-MySQLDatabaseName = repro
+# The database name on the SQL server that contains the repro tables
+#Database1DatabaseName = repro
 
 # If port is not 0, the value is used as the port number for the TCP/IP connection. Note that
 # the host parameter determines the type of the connection.
-MySQLPort = 3306
+#Database1Port = 3306
 
-# The Users and MessageSilo database tables are different from the other repro configuration
-# database tables, in that they are accessed at runtime as SIP requests arrive.  It may be
-# desirable to use BerkeleyDb for the other repro tables (which are read at starup time, then 
-# cached in memory), and MySQL for the runtime accessed tables; or two seperate MySQL instances 
-# for these different table sets.  Use the following settings in order to specify a seperate 
-# MySQL instance for use by the Users and MessageSilo tables.
-#
-# WARNING: repro must be compiled with the USE_MYSQL flag in order for this work.
-# 
-# Note:  If this setting is left blank then repro will fallback all remaining my sql
-# settings to use the global MySQLServer settings.  If the MySQLServer setting is also
-# blank, then repro will use BerkelyDB for all configuration tables.  See the 
-# documentation on the global MySQLServer settings for more details on the following 
-# individual settings.
-RuntimeMySQLServer =
-RuntimeMySQLUser = root
-RuntimeMySQLPassword = root
-RuntimeMySQLDatabaseName = repro
-RuntimeMySQLPort = 3306
-
-# If you would like to be able to authenticate users from a MySQL source other than the repro user
-# database table itself, then specify the query here.  The following conditions apply:
-# 1.  The database table must reside on the same MySQL server instance as the repro database
-#     or Runtime tables database.
+# If you would like to be able to authenticate users from a SQL source other than the repro user
+# database table itself, or if you want to customize the query to use the passwordHashAlt (HA1B hash)
+# or consider the values of other columns, then specify the query here.  The following conditions apply:
+# 1.  The database table must reside on the same SQL server instance as the repro database
+#     or RuntimeDatabase.
 # 2.  The statement provided will be UNION'd with the hardcoded repro query, so that auth from
 #     both sources is possible.  Note:  If the same user exists in both tables, then the repro
 #     auth info will be used.
@@ -288,9 +493,39 @@ RuntimeMySQLPort = 3306
 # 4.  The provided SELECT statement must contain two tags embedded into the query: $user and $domain
 #     These tags should be used in the WHERE clause, and repro will replace these tags with the
 #     actual user and domain being queried.
-# Example:  SELECT sip_password_ha1 FROM directory.users WHERE sip_userid = '$user' AND 
-#           sip_domain = '$domain' AND account_status = 'active'
-MySQLCustomUserAuthQuery =
+#
+# Example:
+#    SELECT sip_password_ha1 FROM directory.users WHERE sip_userid = '$user' AND sip_domain = '$domain' AND account_status = 'active'
+#
+# Example for passwordHashAlt (PostgreSQL):
+#    SELECT passwordHashAlt FROM users WHERE username = '$user' AND domain = 'example.org'
+#
+# Example for passwordHashAlt (MySQL):
+#    SELECT passwordHashAlt FROM users WHERE user = '$user' AND domain = 'example.org'
+#
+#Database1CustomUserAuthQuery =
+
+# The Users and MessageSilo database tables are different from the other repro configuration
+# database tables, in that they are accessed at runtime as SIP requests arrive.  It may be
+# desirable to use BerkeleyDb for the other repro tables (which are read at starup time, then
+# cached in memory), and SQL for the runtime tables; or two separate SQL instances
+# for these different table sets.  Use the following settings in order to specify a separate
+# database instance for use by the Users and MessageSilo tables.
+#
+# If RuntimeDatabase is blank or unspecified, the DefaultDatabase is used.
+#
+# Here we define database '2':
+#Database2Type = PostgreSQL
+#Database2Host = localhost
+#Database2User = repro
+#Database2Password = repro
+#Database2DatabaseName = repro
+#Database2Port = 5432
+#Database2CustomUserAuthQuery =
+#
+# and use RuntimeDatabase to choose database '2' for runtime tables:
+#
+#RuntimeDatabase = 2
 
 # Session Accounting - When enabled resiprocate will push a JSON formatted 
 # events for sip session related messaging that the proxy receives,
@@ -310,8 +545,8 @@ MySQLCustomUserAuthQuery =
 # be consumed by linux scripting tools and converted to database records or some
 # other relevant representation of the data.  
 # For example: ./queuetostream ./sessioneventqueue > streamconsumer
-# In the future a MySQL consumer may also be provided in order to update
-# session accounting records in a MySQL database table.
+# In the future an SQL consumer may also be provided in order to update
+# session accounting records in a SQL database table.
 SessionAccountingEnabled = false
 
 # The following setting determines if repro will add routing header information
@@ -338,8 +573,8 @@ SessionAccountingAddViaHeaders = false
 # be consumed by linux scripting tools and converted to database records or some
 # other relevant representation of the data.  
 # For example: ./queuetostream ./regeventqueue > streamconsumer
-# In the future a MySQL consumer may also be provided in order to update 
-# login/registration accounting records in a MySQL database table.
+# In the future a SQL consumer may also be provided in order to update 
+# login/registration accounting records in a SQL database table.
 RegistrationAccountingEnabled = false
 
 # The following setting determines if repro will add routing header information
@@ -356,8 +591,13 @@ RegistrationAccountingLogRefreshes = false
 # Run a Certificate Server - Allows PUBLISH and SUBSCRIBE for certificates
 EnableCertServer = false
 
-# Value of server header for local UAS responses
-ServerText =
+# Value of server and user agent headers for local UAS and registration
+# server responses
+#
+# Default value is "repro PACKAGE_VERSION" if PACKAGE_VERSION is defined
+# during compilation and no header is generated at all otherwise
+#
+#ServerText =
 
 # Enables Congestion Management
 CongestionManagement = true
@@ -433,6 +673,18 @@ AssumePath = true
 # Disable registrar
 DisableRegistrar = false
 
+# Enable Presence server
+EnablePresenceServer = true
+
+# Will report "open" basic presence for aor's that are registered, but don't publish presence.
+# Always report "closed" basic presence for unregistered AORs
+PresenceUsesRegistrationState = false
+
+# If enabled presence server will fabricate a simple presence closed state for users
+# that haven't published any presence.  If disabled then a 480 response is returned.
+# Note:  This setting has no effect when PresenceUsesRegistrationState is set to true.
+PresenceNotifyClosedStateForNonPublishedUsers = true
+
 # Specify a comma separate list of enum suffixes to search for enum dns resolution
 EnumSuffixes =
 
@@ -449,6 +701,12 @@ TimerC = 180
 # Override the default value of T1 in ms (you probably should not change this) - leave 
 # as 0 to use default of 500ms)
 TimerT1 = 0
+
+# The amount to time to allow for a TCP connect to complete for each transaction.  If
+# this value is exceed, then the stack will generate a 408 or try the next available
+# DNS entry.  Default to 0 - no special timer: error out on receiving RST/ACK error or 
+# SIP transaction timeout (32 seconds when T1 is 500).
+TCPConnectTimeout = 0
 
 # Disable outbound support (RFC5626)
 # WARNING: Before enabling this, ensure you have a RecordRouteUri setup, or are using
@@ -493,6 +751,17 @@ ClientNatDetectionMode = DISABLED
 # outbound is enabled (default: 0)
 FlowTimer = 0
 
+# When set to false then we only allow relaying (forwarding of a request that is not
+# From one of our domain users to a destination that is not one of domains), if the sending
+# source is in our ACL list.  With this set to true we will always allow requests to be
+# relayed.
+AlwaysAllowRelaying = false
+
+# When set to false, we will strip the Proxy-Authorization headers from forwarded requests when
+# forwarding outside of our domain and the Proxy-Authorization realm is our domain.  With
+# this set to true we will never strip the Proxy-Authorization headers from forwarded
+# requests.
+NeverStripProxyAuthorizationHeaders = false
 
 ########################################################
 # CertificateAuthenticator Monkey Settings
@@ -506,11 +775,11 @@ FlowTimer = 0
 #    header of each SIP message on the TlsConnection
 # Examples:
 # Cert 1:
-#    common name = daniel@pocock.com.au
-#    => From: <daniel@pocock.com.au> is the only value that will pass
+#    common name = daniel@pocock.pro
+#    => From: <daniel@pocock.pro> is the only value that will pass
 # Cert 2:
-#    subjectAltName = pocock.com.au
-#    => From: <<anything>@pocock.com.au> will be accepted
+#    subjectAltName = pocock.pro
+#    => From: <<anything>@pocock.pro> will be accepted
 # Typically, case 1 is for a real client connection (e.g. Jitsi), case 2
 # (whole domain) is for federated SIP proxy-to-proxy communication (RFC 5922)
 EnableCertificateAuthenticator = false
@@ -546,7 +815,33 @@ EnableCertificateAuthenticator = false
 ########################################################
 
 # Disable DIGEST challenges - disables this monkey
-DisableAuth = true
+DisableAuth = false
+
+# Always use a specified realm name to challenge
+# Default behavior (if StaticRealm not specified) is to challenge
+# using the hostname from the request URI as the realm
+StaticRealm =
+
+# Enable RADIUS lookups (only works if DIGEST enabled)
+# Default: false
+#EnableRADIUS = true
+
+# Specify the configuration file the RADIUS client should use
+# This is the file that specifies the name of the RADIUS server to
+# use and other essential parameters.
+# If different processes each have different RADIUS parameters,
+# they can copy the radiusclient.conf file to a non-standard location
+# and modify it as required.
+#
+# Note the following:
+# - the seqfile specified in the RADIUS configuration file
+#   must be writeable by the user the repro process runs as.
+#   It is a good idea to locate that file in a directory such as /var/run/repro
+#   owned by repro
+# - the dictionary must include various elements such as Sip-Session,
+#   copy these from the sample dictionary.sip file
+# Default: /etc/radiusclient/radiusclient.conf
+#RADIUSConfiguration = 
 
 # Http hostname for this server (used in Identity headers)
 HttpHostname =
@@ -558,7 +853,7 @@ DisableIdentity = false
 EnablePAssertedIdentityProcessing = false
 
 # Disable auth-int DIGEST challenges
-DisableAuthInt = false
+DisableAuthInt = true
 
 # Send 403 if a client sends a bad nonce in their credentials (will send a new 
 # challenge otherwise)
@@ -567,6 +862,28 @@ RejectBadNonces = false
 # allow To tag in registrations
 AllowBadReg = false
 
+########################################################
+# Cookie Authentication Settings
+########################################################
+
+# Shared secret for cookie HMAC validation. If there is no WSCookieAuthSharedSecret
+# there will be no cookie validation.
+#
+# See
+#  http://www.resiprocate.org/SIP_Over_WebSocket_Cookies
+# for details of the cookie authentication scheme
+#
+# WSCookieAuthSharedSecret =
+
+# Names of the cookies to use for the cookie authentication protocol
+# These are the default values:
+#WSCookieNameInfo = WSSessionInfo
+#WSCookieNameExtra = WSSessionExtra
+#WSCookieNameMAC = WSSessionMAC
+
+# Name of the extension header that must match the content of
+# the authenticated WSSessionExtra cookie
+#WSCookieExtraHeaderName = X-WS-Session-Extra
 
 ########################################################
 # RequestFilter Monkey Settings
@@ -586,22 +903,23 @@ RequestFilterDefaultNoMatchBehavior =
 # to continue.  Otherwise set to a SIP status error code (400-699) that should be  
 # used to reject the request (ie. 500 - Server Internal Error).
 # The status code can optionally be followed by a , and SIP reason text.
-# Note: DB support for this action requires MySQL support.
+# Note: DB support for this action requires SQL support.
 RequestFilterDefaultDBErrorBehavior = 500, Server Internal DB Error
 
-# The hostname running MySQL server to connect to for any blocked entries
+# The database server to connect to for any blocked entries
 # that are configured to used a SQL statement.
-# WARNING: repro must be compiled with the USE_MYSQL flag in order for this work.
 #
-# Note:  If this setting is left blank then repro will fallback all remaining my sql
-# settings to use the global RuntimeMySQLServer or MySQLServer settings.  See the 
-# documentation on the global MySQLServer settings for more details on the following 
-# individual settings.
-RequestFilterMySQLServer =
-RequestFilterMySQLUser = root
-RequestFilterMySQLPassword = root
-RequestFilterMySQLDatabaseName = 
-RequestFilterMySQLPort = 3306
+# WARNING: repro must be compiled with the USE_MYSQL or USE_POSTGRESQL flags in
+# order for this work.
+#
+# Note:  If this setting is left blank then repro will fallback all remaining Database
+# settings to use the global RuntimeDatabase or DefaultDatabase settings.  See the
+# documentation on the global Database settings for more details on how
+# to declare a Database connection.
+#
+# Specify that Database3* settings should be used for the RequestFilter:
+#
+#RequestFilterDatabase = 3
 
 
 ########################################################
@@ -623,6 +941,14 @@ ParallelForkStaticRoutes = false
 # StaticRoutes become fallback targets, processed only after all location server 
 # targets fail.
 ContinueProcessingAfterRoutesFound = false
+
+# Challenge calls from third-party domains to local domains
+# If certificate authentication is enabled and a
+# request arrives over TLS, they will still not be
+# challenged anyway if their domain certificate
+# validates their message.
+# Default: true if DIGEST challenge is enabled
+ChallengeThirdPartiesCallingLocalDomains = true
 
 
 ########################################################
@@ -759,4 +1085,11 @@ QValueWaitForTerminateBetweenForkGroups = true
 # QValueWaitForTerminateBetweenForkGroups is false
 QValueMsBetweenForkGroups = 3000
 
+########################################################
+# Include other configuration files
+########################################################
+
+# It is possible to include one or more additional configuration files using the
+# Include directive one or more times:
+#Include = /etc/repro/more-transports.config
 

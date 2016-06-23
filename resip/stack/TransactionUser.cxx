@@ -76,19 +76,18 @@ TransactionUser::wouldAccept(TimeLimitFifo<Message>::DepthUsage usage) const
 bool
 TransactionUser::isForMe(const SipMessage& msg) const
 {
-   DebugLog (<< "Checking if " << msg.brief() << " is for me");
    // do this for each MessageFilterRule
    for (MessageFilterRuleList::const_iterator i = mRuleList.begin() ; 
         i != mRuleList.end() ; ++i)
    {
-       DebugLog (<< "Checking rule...");
+       DebugLog(<< "TransactionUser::isForMe: TU=" << name() << ", Checking rule... : " << msg.brief());
        if (i->matches(msg))
        {
-          DebugLog (<< "Match!");
+           DebugLog(<< "TransactionUser::isForMe: TU=" << name() << ", Match! : " << msg.brief());
           return true;
        }       
    }
-   DebugLog (<< "No matching rule found");
+   DebugLog(<< "TransactionUser::isForMe: TU=" << name() << ", No matching rule found : " << msg.brief());
    return false;
 }
 
@@ -99,10 +98,21 @@ TransactionUser::isMyDomain(const Data& domain) const
    return mDomainList.count(Data(domain).lowercase()) > 0;
 }
 
-void TransactionUser::addDomain(const Data& domain)
+void 
+TransactionUser::addDomain(const Data& domain)
 {
    // Domain search should be case insensitive - store in lowercase only
    mDomainList.insert(Data(domain).lowercase());  
+}
+
+void 
+TransactionUser::removeDomain(const Data& domain)
+{
+   DomainList::iterator it = mDomainList.find(Data(domain).lowercase());
+   if (it != mDomainList.end())
+   {
+      mDomainList.erase(it);
+   }
 }
 
 EncodeStream& 

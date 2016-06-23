@@ -32,21 +32,21 @@ KeyValueStore::Key CertificateAuthenticator::mCertificateVerifiedKey = Proxy::al
 
 CertificateAuthenticator::CertificateAuthenticator(ProxyConfig& config,
                                                    resip::SipStack* stack,
-                                                   std::set<Data>& trustedPeers,
+                                                   AclStore& aclStore,
                                                    bool thirdPartyRequiresCertificate) :
    Processor("CertificateAuthenticator"),
-   mTrustedPeers(trustedPeers),
+   mAclStore(aclStore),
    mThirdPartyRequiresCertificate(thirdPartyRequiresCertificate)
 {
 }
 
 CertificateAuthenticator::CertificateAuthenticator(ProxyConfig& config,
                                                    resip::SipStack* stack,
-                                                   std::set<Data>& trustedPeers,
+                                                   AclStore& aclStore,
                                                    bool thirdPartyRequiresCertificate,
                                                    CommonNameMappings& commonNameMappings) :
    Processor("CertificateAuthenticator"),
-   mTrustedPeers(trustedPeers),
+   mAclStore(aclStore),
    mThirdPartyRequiresCertificate(thirdPartyRequiresCertificate),
    mCommonNameMappings(commonNameMappings)
 {
@@ -97,6 +97,16 @@ CertificateAuthenticator::process(repro::RequestContext &rc)
       }
       
       const std::list<resip::Data> &peerNames = sipMessage->getTlsPeerNames();
+
+      if(isTrustedSource(peerNames))
+      {
+         DebugLog(<< "Matched trusted peer by certificate in ACL");
+         rc.getKeyValueStore().setBoolValue(CertificateAuthenticator::mCertificateVerifiedKey, true);
+         // Simulate the behavior of IsTrustedNode monkey:
+         rc.getKeyValueStore().setBoolValue(IsTrustedNode::mFromTrustedNodeKey, true);
+         return Continue;
+      }
+
       if (proxy.isMyDomain(sipMessage->header(h_From).uri().host()))
       {
          if (!rc.getKeyValueStore().getBoolValue(IsTrustedNode::mFromTrustedNodeKey))
@@ -105,7 +115,7 @@ CertificateAuthenticator::process(repro::RequestContext &rc)
             // or if the message didn't come in on TLS transport
             if(peerNames.empty())
                return Continue;
-            if(authorizedForThisIdentity(peerNames, sipMessage->header(h_From).uri()))
+            if(authorizedForThisIdentity(rc, peerNames, sipMessage->header(h_From).uri()))
             {
                rc.getKeyValueStore().setBoolValue(CertificateAuthenticator::mCertificateVerifiedKey, true);
                return Continue;
@@ -132,7 +142,7 @@ CertificateAuthenticator::process(repro::RequestContext &rc)
             else
                return Continue;
          }
-         if(authorizedForThisIdentity(peerNames, sipMessage->header(h_From).uri()))
+         if(authorizedForThisIdentity(rc, peerNames, sipMessage->header(h_From).uri()))
          {
             rc.getKeyValueStore().setBoolValue(CertificateAuthenticator::mCertificateVerifiedKey, true);
             return Continue;
@@ -147,7 +157,13 @@ CertificateAuthenticator::process(repro::RequestContext &rc)
 }
 
 bool
-CertificateAuthenticator::authorizedForThisIdentity(const std::list<Data>& peerNames,
+CertificateAuthenticator::isTrustedSource(const std::list<Data>& peerNames)
+{
+   return mAclStore.isTlsPeerNameTrusted(peerNames);
+}
+
+bool
+CertificateAuthenticator::authorizedForThisIdentity(RequestContext& context, const std::list<Data>& peerNames,
                                                 resip::Uri &fromUri)
 {
    Data aor = fromUri.getAorNoPort();
@@ -157,11 +173,6 @@ CertificateAuthenticator::authorizedForThisIdentity(const std::list<Data>& peerN
    for(; it != peerNames.end(); ++it)
    {
       const Data& i = *it;
-      if(mTrustedPeers.find(i) != mTrustedPeers.end())
-      {
-         DebugLog(<< "Matched certificate name " << i << " is a trusted peer, not checking against From URI");
-         return true;
-      }
       if(i == aor)
       {
          DebugLog(<< "Matched certificate name " << i << " against full AoR " << aor);

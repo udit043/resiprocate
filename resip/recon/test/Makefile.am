@@ -12,22 +12,17 @@ LDADD += ../../../reflow/libreflow.la
 #LDADD += ../../../../sipXtapi/sipXmediaLib/src/mp/codecs/plgtones/codec_tones.la
 #LDADD += ../../../../sipXtapi/sipXmediaLib/src/mp/codecs/plgpcmapcmu/codec_pcmapcmu.la
 #LDADD += ../../../../sipXtapi/sipXmediaLib/src/mp/codecs/plgilbc/codec_ilbc.la
-LDADD += -lsipXsdp
-#LDADD += /../../../sipXtapi/sipXmediaAdapterLib/interface/libmediainterface.la
-LDADD += -lsipXmediaProcessing
-LDADD += -lsipXmedia
-LDADD += -lsipXport
-LDADD += -lsipXtack
 LDADD += ../../dum/libdum.la
 LDADD += ../../stack/libresip.la
 LDADD += ../../../rutil/librutil.la
-LDADD += $(LIBSSL_LIBADD) -lpthread
+LDADD += $(LIBSSL_LIBADD) @LIBPTHREAD_LIBADD@
 
 AM_CPPFLAGS = -I$(top_srcdir)/resip/recon
 
-TESTS = \
-        sdpTests \
-        unitTests
+TESTS = sdpTests
+# disabled - doesn't run without local audio hardware:
+# lt-unitTests: mp/MpOss.cpp:828: static void* MpOss::soundCardIoWrapper(void*): Assertion `res == 0' failed.
+#TESTS += unitTests
 
 bin_PROGRAMS = testUA
 
@@ -38,6 +33,8 @@ check_PROGRAMS = \
 testUA_SOURCES = testUA.cxx playback_prompt.h record_prompt.h
 sdpTests_SOURCES = sdpTests.cxx
 unitTests_SOURCES = unitTests.cxx
+testUA_LDADD = -lsipXport
+testUA_LDADD += $(LDADD)
 
 
 

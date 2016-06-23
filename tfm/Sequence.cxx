@@ -6,6 +6,8 @@
 #include "tfm/Sequence.hxx"
 #include "tfm/SequenceSet.hxx"
 
+#include <boost/version.hpp>
+
 using namespace resip;
 using namespace std;
 using namespace boost;
@@ -71,8 +73,8 @@ SequenceClass::getRoot() const
 void 
 SequenceClass::setBranchCount(unsigned int count)
 {
-   assert(count);
-   assert(mBranchCount == 0);
+   resip_assert(count);
+   resip_assert(mBranchCount == 0);
 
    mBranchCount = count;
    removeFromActiveSet();
@@ -88,7 +90,7 @@ SequenceClass::setAfterAction(ActionBase* action)
 bool 
 SequenceClass::decrementBranches()
 {
-   assert(mBranchCount);
+   resip_assert(mBranchCount);
    if (!(--mBranchCount))
    {
       if (mAfterAction)
@@ -190,7 +192,11 @@ SequenceClass::prettyPrint(EncodeStream& str, bool& previousActive, int ind) con
 bool
 SequenceClass::isMatch(boost::shared_ptr<Event> event) const
 {
+#if BOOST_VERSION >= 103500
+   boost::shared_ptr<OptionalTimeoutEvent> to = dynamic_pointer_cast<OptionalTimeoutEvent>(event);
+#else
    boost::shared_ptr<OptionalTimeoutEvent> to = shared_dynamic_cast<OptionalTimeoutEvent>(event);
+#endif
    for (std::list<TestEndPoint::ExpectBase*>::const_iterator i = mExpects.begin();
         i != mExpects.end(); i++)
    {
@@ -232,7 +238,11 @@ SequenceClass::handleEvent(boost::shared_ptr<Event> event)
       mUsedExpects.push_back(mExpects.front());
       mExpects.pop_front();
 
+#if BOOST_VERSION >= 103500
+      boost::shared_ptr<OptionalTimeoutEvent> ot = dynamic_pointer_cast<OptionalTimeoutEvent>(event);
+#else
       boost::shared_ptr<OptionalTimeoutEvent> ot = shared_dynamic_cast<OptionalTimeoutEvent>(event);
+#endif
       if (ot && ot->getExpect() == expect)
       {
          mTimerId=-7;
@@ -269,7 +279,7 @@ SequenceClass::handleEvent(boost::shared_ptr<Event> event)
          }
          else
          {
-            assert(0);
+            resip_assert(0);
          }
       }
       catch (BaseException& e)
@@ -340,7 +350,7 @@ void SequenceClass::cancelTimeout()
          // Race condition; it is likely that the timer is sitting, unprocessed, 
          // in our message queue, right as we satisfy the expect that the timer
          // was waiting for. It would be nice to figure out a way to fix this.
-         assert(0);
+         resip_assert(0);
       }
       mTimerId = -7;
    }

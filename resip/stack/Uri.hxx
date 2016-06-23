@@ -2,7 +2,7 @@
 #define RESIP_URI_HXX 
 
 #include <bitset>
-#include <cassert>
+#include "rutil/ResipAssert.h"
 
 #include "resip/stack/ParserCategory.hxx"
 #include "resip/stack/Token.hxx"
@@ -45,6 +45,8 @@ class Uri : public ParserCategory
       const Data& userParameters() const {checkParsed(); return mUserParameters;}
       Data& opaque() {checkParsed(); return mHost;}
       const Data& opaque() const {checkParsed(); return mHost;}
+      Data& path() {checkParsed(); return mPath;}
+      const Data& path() const {checkParsed(); return mPath;}
 
       // Returns user@host[:port] (no scheme)
       Data getAor() const;
@@ -144,6 +146,9 @@ class Uri : public ParserCategory
       int port() const {checkParsed(); return mPort;}
       Data& password() {checkParsed(); return mPassword;}
       const Data& password() const {checkParsed(); return mPassword;}
+
+      Data& netNs() {return(mNetNs);}
+      const Data& netNs() const {return(mNetNs);}
 
       Data toString() const;
 
@@ -255,15 +260,17 @@ class Uri : public ParserCategory
 
    protected:
       Data mScheme;
-      // .bwc. I don't like this.
-      mutable Data mHost;
+      Data mHost;
       Data mUser;
       Data mUserParameters;
       int mPort;
       Data mPassword;
+      Data mNetNs;  ///< Net namespace name scoping host and port
+      Data mPath;
 
       void getAorInternal(bool dropScheme, bool addPort, Data& aor) const;
       mutable bool mHostCanonicalized;
+      mutable Data mCanonicalHost;  ///< cache for IPv6 host comparison
 
    private:
       std::auto_ptr<Data> mEmbeddedHeadersText;

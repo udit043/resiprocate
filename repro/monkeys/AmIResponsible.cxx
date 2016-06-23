@@ -17,8 +17,9 @@ using namespace resip;
 using namespace repro;
 using namespace std;
 
-AmIResponsible::AmIResponsible() : 
-   Processor("AmIResponsible")
+AmIResponsible::AmIResponsible(bool alwaysAllowRelaying) :
+   Processor("AmIResponsible"),
+   mAlwaysAllowRelaying(alwaysAllowRelaying)
 {}
 
 AmIResponsible::~AmIResponsible()
@@ -38,7 +39,7 @@ AmIResponsible::process(RequestContext& context)
 
    // There should be no Routes on the request at this point, if there was a route, then
    // the StrictRouteFixup monkey would have routed to it already
-   assert (!request.exists(h_Routes) || 
+   resip_assert (!request.exists(h_Routes) || 
            request.header(h_Routes).empty());
   
    // Topmost route had a flow-token; this is our problem
@@ -104,7 +105,7 @@ AmIResponsible::process(RequestContext& context)
          //       I-don't-want-to-be-used-as-a-relay problem is crypto; specifically 
          //       Record-Route with crypto that states "Yeah, I set up this dialog, 
          //       let it through".
-         if (!request.header(h_To).exists(p_tag))
+         if (!request.header(h_To).exists(p_tag) && !mAlwaysAllowRelaying)
          {
             // Ensure From header is well formed
             if(!request.header(h_From).isWellFormed())

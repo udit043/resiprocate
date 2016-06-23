@@ -44,7 +44,7 @@ UdpTransport::UdpTransport(Fifo<TransactionMessage>& fifo,
    mPollEventCnt = 0;
    mTxTryCnt = mTxMsgCnt = mTxFailCnt = 0;
    mRxTryCnt = mRxMsgCnt = mRxKeepaliveCnt = mRxTransactionCnt = 0;
-   mTuple.setType(transport());
+   mTuple.setType(UDP);
    mFd = InternalTransport::socket(transport(), version);
    mTuple.mFlowKey=(FlowKey)mFd;
    bind();      // also makes it non-blocking
@@ -120,7 +120,8 @@ UdpTransport::setPollGrp(FdPollGrp *grp)
  * Called after a message is added. Could try writing it now.
  */
 void
-UdpTransport::process() {
+UdpTransport::process() 
+{
    mStateMachineFifo.flush();
    if ( (mTransportFlags & RESIP_TRANSPORT_FLAG_TXNOW)!= 0 )
    {
@@ -129,8 +130,11 @@ UdpTransport::process() {
        // shouldn't ever happen (with current code)
        // but in future we may throttle transmits
    }
+
    if ( mPollGrp )
+   {
        updateEvents();
+   }
 }
 
 void
@@ -157,7 +161,7 @@ UdpTransport::processPollEvent(FdPollEventMask mask)
    ++mPollEventCnt;
    if ( mask & FPEM_Error )
    {
-      assert(0);
+      resip_assert(0);
    }
    if ( mask & FPEM_Write )
    {
@@ -226,19 +230,26 @@ UdpTransport::processTxAll()
       processTxOne(msg);
       // With UDP we don't need to worry about write blocking (I hope)
       if ( (mTransportFlags & RESIP_TRANSPORT_FLAG_TXALL)==0 )
+      {
          break;
+      }
    }
 }
 
 void
 UdpTransport::processTxOne(SendData *data)
 {
+   resip_assert(data);
+   if(data->command != SendData::NoCommand)
+   {
+      // We don't handle any special SendData commands in the UDP transport yet.
+      return;
+   }
    ++mTxMsgCnt;
-   assert(data);
    std::auto_ptr<SendData> sendData(data);
    //DebugLog (<< "Sent: " <<  sendData->data);
    //DebugLog (<< "Sending message on udp.");
-   assert( sendData->destination.getPort() != 0 );
+   resip_assert( sendData->destination.getPort() != 0 );
 
    const sockaddr& addr = sendData->destination.getSockaddr();
    int expected;
@@ -316,23 +327,29 @@ UdpTransport::processRxAll()
       Tuple sender(mTuple);
       int len = processRxRecv(buffer, sender);
       if ( len <= 0 )
+      {
          break;
+      }
       ++mRxMsgCnt;
       if ( processRxParse(buffer, len, sender) )
       {
          buffer = NULL;
       }
-      if ( (mTransportFlags & RESIP_TRANSPORT_FLAG_RXALL)==0 )
+      if ( (mTransportFlags & RESIP_TRANSPORT_FLAG_RXALL) == 0 )
+      {
          break;
+      }
    }
    if ( buffer && (mTransportFlags & RESIP_TRANSPORT_FLAG_KEEP_BUFFER)!=0 )
    {
-      assert(mRxBuffer==NULL);
+      resip_assert(mRxBuffer==NULL);
       mRxBuffer = buffer;
       buffer = NULL;
    }
    if ( buffer )
+   {
       delete[] buffer;
+   }
 }
 
 /*
@@ -359,7 +376,8 @@ UdpTransport::processRxRecv(char*& buffer, Tuple& sender)
       buffer = MsgHeaderScanner::allocateBuffer(MaxBufferSize);
    }
 
-   for (;;) {
+   for (;;) 
+   {
       // !jf! how do we tell if it discarded bytes
       // !ah! we use the len-1 trick :-(
       socklen_t slen = sender.length();
@@ -372,7 +390,7 @@ UdpTransport::processRxRecv(char*& buffer, Tuple& sender)
       if ( len == SOCKET_ERROR )
       {
          int err = getErrno();
-         if ( err != EWOULDBLOCK  )
+         if ( err != EAGAIN && err != EWOULDBLOCK ) // Treat EGAIN and EWOULDBLOCK as the same: http://stackoverflow.com/questions/7003234/which-systems-define-eagain-and-ewouldblock-as-different-values
          {
             error( err );
          }
@@ -442,12 +460,12 @@ UdpTransport::processRxParse(char *buffer, int len, Tuple& sender)
          else if(resp.hasMappedAddress)
          {
 #if defined(WIN32)
-         sin_addr.S_un.S_addr = htonl(resp.mappedAddress.ipv4.addr);
+            sin_addr.S_un.S_addr = htonl(resp.mappedAddress.ipv4.addr);
 #else
-         sin_addr.s_addr = htonl(resp.mappedAddress.ipv4.addr);
+            sin_addr.s_addr = htonl(resp.mappedAddress.ipv4.addr);
 #endif
-         mStunMappedAddress = Tuple(sin_addr,resp.mappedAddress.ipv4.port, UDP);
-         mStunSuccess = true;
+            mStunMappedAddress = Tuple(sin_addr,resp.mappedAddress.ipv4.port, UDP);
+            mStunSuccess = true;
          }
       }
       return false;
@@ -512,40 +530,36 @@ UdpTransport::processRxParse(char *buffer, int len, Tuple& sender)
    // Attempt to decode SigComp message, if appropriate.
    if ((buffer[0] & 0xf8) == 0xf8)
    {
-     if (!mCompression.isEnabled())
-     {
-       InfoLog(<< "Discarding unexpected SigComp Message");
-       return false;
-     }
+      if (!mCompression.isEnabled())
+      {
+         InfoLog(<< "Discarding unexpected SigComp Message");
+         return false;
+      }
 #ifdef USE_SIGCOMP
-     char* newBuffer = MsgHeaderScanner::allocateBuffer(MaxBufferSize);
-     size_t uncompressedLength =
-       mSigcompStack->uncompressMessage(buffer, len,
-                                        newBuffer, MaxBufferSize, sc);
+      char* newBuffer = MsgHeaderScanner::allocateBuffer(MaxBufferSize);
+      size_t uncompressedLength = mSigcompStack->uncompressMessage(buffer, len, newBuffer, MaxBufferSize, sc);
 
-    DebugLog (<< "Uncompressed message from "
-              << len << " bytes to "
-              << uncompressedLength << " bytes");
+      DebugLog (<< "Uncompressed message from "
+               << len << " bytes to "
+               << uncompressedLength << " bytes");
 
+      osc::SigcompMessage *nack = mSigcompStack->getNack();
 
-     osc::SigcompMessage *nack = mSigcompStack->getNack();
+      if (nack)
+      {
+         mTxFifo.add(new SendData(tuple,
+                                  Data(nack->getDatagramMessage(),
+                                       nack->getDatagramLength()),
+                                  Data::Empty,
+                                  Data::Empty,
+                                  true));
+         delete nack;
+      }
 
-     if (nack)
-     {
-       mTxFifo.add(new SendData(tuple,
-                                Data(nack->getDatagramMessage(),
-                                     nack->getDatagramLength()),
-                                Data::Empty,
-                                Data::Empty,
-                                true)
-                  );
-       delete nack;
-     }
-
-     // delete[] buffer; NO: let caller do this if needed
-     origBufferConsumed = false;
-     buffer = newBuffer;
-     len = uncompressedLength;
+      // delete[] buffer; NO: let caller do this if needed
+      origBufferConsumed = false;
+      buffer = newBuffer;
+      len = uncompressedLength;
 #endif
    }
 
@@ -554,7 +568,7 @@ UdpTransport::processRxParse(char *buffer, int len, Tuple& sender)
    //DebugLog ( << "UDP Rcv : " << len << " b" );
    //DebugLog ( << Data(buffer, len).escaped().c_str());
 
-   SipMessage* message = new SipMessage(this);
+   SipMessage* message = new SipMessage(&mTuple);
 
    // set the received from information into the received= parameter in the
    // via
@@ -562,11 +576,7 @@ UdpTransport::processRxParse(char *buffer, int len, Tuple& sender)
    // It is presumed that UDP Datagrams are arriving atomically and that
    // each one is a unique SIP message
 
-
    // Save all the info where this message came from
-   sender.transport = this;
-   sender.transportKey = getKey();
-   sender.mFlowKey=mTuple.mFlowKey;
    message->setSource(sender);
    //DebugLog (<< "Received from: " << sender);
 
@@ -633,9 +643,9 @@ UdpTransport::processRxParse(char *buffer, int len, Tuple& sender)
       {
          send(tryLater);
       }
-     delete message; // dropping message due to congestion
-     message = 0;
-     return origBufferConsumed;
+      delete message; // dropping message due to congestion
+      message = 0;
+      return origBufferConsumed;
    }
 
    if (!basicCheck(*message))
@@ -651,49 +661,46 @@ UdpTransport::processRxParse(char *buffer, int len, Tuple& sender)
 #ifdef USE_SIGCOMP
    if (mCompression.isEnabled() && sc)
    {
-     const Via &via = message->header(h_Vias).front();
-     if (message->isRequest())
-     {
-       // For requests, the compartment ID is read out of the
-       // top via header field; if not present, we use the
-       // TCP connection for identification purposes.
-       if (via.exists(p_sigcompId))
-       {
-         Data compId = via.param(p_sigcompId);
+      const Via &via = message->header(h_Vias).front();
+      if (message->isRequest())
+      {
+         // For requests, the compartment ID is read out of the
+         // top via header field; if not present, we use the
+         // TCP connection for identification purposes.
+         if (via.exists(p_sigcompId))
+         {
+            Data compId = via.param(p_sigcompId);
+            if(!compId.empty())
+            {
+               // .bwc. Crash was happening here. Why was there an empty sigcomp id?
+               mSigcompStack->provideCompartmentId(sc, compId.data(), compId.size());
+            }
+         }
+         else
+         {
+            mSigcompStack->provideCompartmentId(sc, this, sizeof(this));
+         }
+      }
+      else
+      {
+         // For responses, the compartment ID is supposed to be
+         // the same as the compartment ID of the request. We
+         // *could* dig down into the transaction layer to try to
+         // figure this out, but that's a royal pain, and a rather
+         // severe layer violation. In practice, we're going to ferret
+         // the ID out of the the Via header field, which is where we
+         // squirreled it away when we sent this request in the first place.
+         // !bwc! This probably shouldn't be going out over the wire.
+         Data compId = via.param(p_branch).getSigcompCompartment();
          if(!compId.empty())
          {
-            // .bwc. Crash was happening here. Why was there an empty sigcomp
-            // id?
-            mSigcompStack->provideCompartmentId(
-                             sc, compId.data(), compId.size());
+            mSigcompStack->provideCompartmentId(sc, compId.data(), compId.size());
          }
-       }
-       else
-       {
-         mSigcompStack->provideCompartmentId(sc, this, sizeof(this));
-       }
-     }
-     else
-     {
-       // For responses, the compartment ID is supposed to be
-       // the same as the compartment ID of the request. We
-       // *could* dig down into the transaction layer to try to
-       // figure this out, but that's a royal pain, and a rather
-       // severe layer violation. In practice, we're going to ferret
-       // the ID out of the the Via header field, which is where we
-       // squirreled it away when we sent this request in the first place.
-       // !bwc! This probably shouldn't be going out over the wire.
-       Data compId = via.param(p_branch).getSigcompCompartment();
-       if(!compId.empty())
-       {
-         mSigcompStack->provideCompartmentId(sc, compId.data(), compId.size());
-       }
-     }
-
+      }
    }
 #endif
 
-   mStateMachineFifo.add(message);
+   pushRxMsgUp(message);
    ++mRxTransactionCnt;
    return origBufferConsumed;
 }

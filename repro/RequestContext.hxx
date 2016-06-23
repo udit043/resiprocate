@@ -56,11 +56,12 @@ class RequestContext
       ResponseContext& getResponseContext();
       
       resip::NameAddr& getTopRoute();
+      const resip::Data& getDigestRealm();
             
       virtual void send(resip::SipMessage& msg);
       void sendResponse(resip::SipMessage& response);
 
-      void forwardAck200(const resip::SipMessage& ack);
+      virtual void forwardAck200(const resip::SipMessage& ack);
       void postAck200Done();
       
       void updateTimerC();
@@ -98,9 +99,9 @@ class RequestContext
       resip::NameAddr mTopRoute;
       ResponseContext mResponseContext;
       int mTCSerial;
-      resip::KeyValueStore mKeyValueStore;
       bool mSessionCreatedEventSent;
       bool mSessionEstablishedEventSent;
+      resip::KeyValueStore mKeyValueStore;
 
       typedef std::vector<ProcessorChain::Chain::iterator>
 
@@ -110,8 +111,8 @@ class RequestContext
       ChainIteratorStack;
       ChainIteratorStack mChainIteratorStack;
       
-      void fixStrictRouterDamage();
-      void removeTopRouteIfSelf();
+      virtual void fixStrictRouterDamage();
+      virtual void removeTopRouteIfSelf();
       
       friend class ResponseContext;
       friend EncodeStream& operator<<(EncodeStream& strm, const repro::RequestContext& rc);

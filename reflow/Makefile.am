@@ -2,7 +2,7 @@
 
 EXTRA_DIST = ReadMe.txt
 EXTRA_DIST += *.vcproj
-EXTRA_DIST += reflow_10_0.vcxproj reflow_10_0.vcxproj.filters
+EXTRA_DIST += *.vcxproj *.vcxproj.filters
 
 SUBDIRS = .
 #SUBDIRS += dtls_wrapper/test
@@ -13,7 +13,10 @@ AM_CXXFLAGS = -I $(top_srcdir)
 lib_LTLIBRARIES = libreflow.la
 libreflow_la_LIBADD = ../reTurn/client/libreTurnClient.la
 libreflow_la_LIBADD += ../rutil/librutil.la
+libreflow_la_LIBADD += -lsipXmediaProcessing
 libreflow_la_LIBADD += @LIBSSL_LIBADD@ -lsrtp
+libreflow_la_LIBADD += @LIBSTL_LIBADD@
+libreflow_la_LIBADD += @LIBPTHREAD_LIBADD@
 libreflow_la_LDFLAGS = @LIBTOOL_VERSION_RELEASE@ -export-dynamic
 
 libreflow_la_SOURCES = FakeSelectSocketDescriptor.cxx \

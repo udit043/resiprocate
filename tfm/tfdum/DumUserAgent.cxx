@@ -34,6 +34,14 @@
 #include "resip/stack/SipMessage.hxx"
 #include "resip/stack/SdpContents.hxx"
 
+#if defined (USE_SSL)
+#if defined(WIN32) 
+#include "resip/stack/ssl/WinSecurity.hxx"
+#else
+#include "resip/stack/ssl/Security.hxx"
+#endif
+#endif
+
 #include <boost/bind.hpp>
 #include <boost/function.hpp>
 
@@ -58,7 +66,7 @@ dispatchEventHelper(E* event, C& container)
    }
 
    ErrLog(<< "No matching endpoint for event " << typeid(*event).name());
-   assert(0);
+   resip_assert(0);
    throw TestEndPoint::GlobalFailure("No matching endpoint for the event", __FILE__, __LINE__);
 }
 
@@ -73,7 +81,6 @@ DumUserAgent::makeProfile(const resip::Uri& aor, const Data& password)
    profile->setDefaultFrom(NameAddr(aor));
    profile->setUserAgent("dum/tfm");
    profile->setDigestCredential(aor.host(), aor.user(), aor.password());   
-   profile->addSupportedMethod(REFER);   
    profile->setInstanceId(resip::Random::getRandomHex(4));   
    profile->gruuEnabled() = true;
    
@@ -84,6 +91,12 @@ const resip::NameAddr&
 DumUserAgent::getAor() const
 {
    return getProfile()->getDefaultFrom();
+}
+
+ExpectAction* DumUserAgent::setOfferToProvideInNextOnAnswerCallback(boost::shared_ptr<resip::SdpContents> offer) 
+{ 
+   mOfferToProvideInNextOnAnswerCallback = offer; 
+   return new NoAction();
 }
 
 // DumUaAction* 
@@ -109,7 +122,16 @@ DumUserAgent::clean()
 
 DumUserAgent::DumUserAgent(resip::SharedPtr<resip::MasterProfile> profile) :
    mProfile(profile),
-   mDum(mStack, true),
+   mPollGrp(FdPollGrp::create()),  // Will create EPoll implementation if available, otherwise FdPoll
+   mInterruptor(new EventThreadInterruptor(*mPollGrp)),
+#if defined(USE_SSL)
+   mSecurity(new Security),
+#else
+   mSecurity(0),
+#endif
+   mStack(new SipStack(mSecurity, DnsStub::EmptyNameserverList, mInterruptor)),
+   mStackThread(new EventStackThread(*mStack, *mInterruptor, *mPollGrp)),
+   mDum(new DialogUsageManager(*mStack, true)),
    mTestProxy(0),
    mAppDialogSet(0),
    mNatNavigator(false),
@@ -123,7 +145,16 @@ DumUserAgent::DumUserAgent(resip::SharedPtr<resip::MasterProfile> profile) :
 DumUserAgent::DumUserAgent(resip::SharedPtr<resip::MasterProfile> profile,
                            TestProxy* proxy) : 
    mProfile(profile),
-   mDum(mStack, true),
+   mPollGrp(FdPollGrp::create()),  // Will create EPoll implementation if available, otherwise FdPoll
+   mInterruptor(new EventThreadInterruptor(*mPollGrp)),
+#if defined(USE_SSL)
+   mSecurity(new Security),
+#else
+   mSecurity(0),
+#endif
+   mStack(new SipStack(mSecurity, DnsStub::EmptyNameserverList, mInterruptor)),
+   mStackThread(new EventStackThread(*mStack, *mInterruptor, *mPollGrp)),
+   mDum(new DialogUsageManager(*mStack, true)),
    mTestProxy(proxy),
    mAppDialogSet(0),
    mNatNavigator(false),
@@ -145,6 +176,18 @@ DumUserAgent::~DumUserAgent()
                              mProfile->getDefaultFrom().uri());
    }
    unregisterFromTransportDriver();
+
+   mStack->shutdownAndJoinThreads();
+   mStackThread->shutdown();
+   mStackThread->join();
+   mStack->setCongestionManager(0);
+
+   delete mDum;
+   delete mStack;
+   delete mStackThread;
+   delete mInterruptor;
+   delete mPollGrp;
+   // Note:  mStack descructor will delete mSecurity
 }
 
 void
@@ -154,9 +197,9 @@ DumUserAgent::init()
    mPort = PortAllocator::getNextPort();
    if( !mNatNavigator )
    {
-      mDum.addTransport(resip::UDP, mPort, resip::V4, mIp);
+      mStack->addTransport(resip::UDP, mPort, resip::V4, StunDisabled, mIp);
    }
-   mDum.addTransport(resip::TCP, mPort, resip::V4, mIp);
+   mStack->addTransport(resip::TCP, mPort, resip::V4, StunDisabled, mIp);
 
    mProfile->setFixedTransportInterface(mIp);
 
@@ -165,95 +208,99 @@ DumUserAgent::init()
    mProfile->addSupportedMethod(INFO);
    mProfile->addSupportedMethod(MESSAGE);
    mProfile->addSupportedMethod(REFER);
+   mProfile->addSupportedMethod(PRACK);
   
-   mDum.setMasterProfile(mProfile);
+   mDum->setMasterProfile(mProfile);
 
-   mDum.setClientRegistrationHandler(this);
+   mDum->setClientRegistrationHandler(this);
 
-   mDum.setDialogSetHandler(this);
-   //mDum.addServerSubscriptionHandler("presence", this);
-   //mDum.addClientSubscriptionHandler("presence", this);
-   //mDum.addClientSubscriptionHandler("message-summary", this);
-   //mDum.addServerSubscriptionHandler("message-summary", this);
-   mDum.setInviteSessionHandler(this);
+   mDum->setDialogSetHandler(this);
+   //mDum->addServerSubscriptionHandler("presence", this);
+   //mDum->addClientSubscriptionHandler("presence", this);
+   //mDum->addClientSubscriptionHandler("message-summary", this);
+   //mDum->addServerSubscriptionHandler("message-summary", this);
+   mDum->setInviteSessionHandler(this);
 
    std::auto_ptr<resip::ClientAuthManager> clam(new resip::ClientAuthManager());
-   mDum.setClientAuthManager(clam);
+   mDum->setClientAuthManager(clam);
    
    //!dcm! -- use TestAP/dumv2 pattern
-//   mDum.addOutOfDialogHandler(REFER, this);
+//   mDum->addOutOfDialogHandler(REFER, this);
+
+   mStack->run();
+   mStackThread->run();
 }
 
 void
 DumUserAgent::addClientSubscriptionHandler(const Data& eventType, ClientSubscriptionHandler* h)
 {
-   mDum.addClientSubscriptionHandler(eventType, h);
+   mDum->addClientSubscriptionHandler(eventType, h);
 }
 
 void
 DumUserAgent::addServerSubscriptionHandler(const Data& eventType, ServerSubscriptionHandler* h)
 {
-   mDum.addServerSubscriptionHandler(eventType, h);
+   mDum->addServerSubscriptionHandler(eventType, h);
 }
 
 void
 DumUserAgent::addClientPublicationHandler(const Data& eventType, ClientPublicationHandler* h)
 {
-   mDum.addClientPublicationHandler(eventType, h);
+   mDum->addClientPublicationHandler(eventType, h);
 }
 
 void
 DumUserAgent::addServerPublicationHandler(const Data& eventType, ServerPublicationHandler* h)
 {
-   mDum.addServerPublicationHandler(eventType, h);
+   mDum->addServerPublicationHandler(eventType, h);
 }
 
 void
 DumUserAgent::addClientPagerMessageHandler(ClientPagerMessageHandler* h)
 {
-   mDum.setClientPagerMessageHandler(h);
+   mDum->setClientPagerMessageHandler(h);
 }
 
 void
 DumUserAgent::addServerPagerMessageHandler(ServerPagerMessageHandler* h)
 {
-   mDum.setServerPagerMessageHandler(h);
+   mDum->setServerPagerMessageHandler(h);
 }
 
 void
 DumUserAgent::addOutOfDialogHandler(MethodTypes methodType, OutOfDialogHandler* h)
 {
-   mDum.addOutOfDialogHandler(methodType, h);
+   mDum->addOutOfDialogHandler(methodType, h);
 }
 
 void
 DumUserAgent::addSupportedOptionTag(const Token& tag)
 {
-   mDum.getMasterProfile()->addSupportedOptionTag(tag);
+   mDum->getMasterProfile()->addSupportedOptionTag(tag);
 }
 
 void
 DumUserAgent::setOutboundProxy(const Uri& proxy)
 {
-   mDum.getMasterProfile()->setOutboundProxy(proxy);
+   mDum->getMasterProfile()->setOutboundProxy(proxy);
 }
 
 void
 DumUserAgent::unsetOutboundProxy()
 {
-   mDum.getMasterProfile()->unsetOutboundProxy();
+   mDum->getMasterProfile()->unsetOutboundProxy();
 }
 
 void
 DumUserAgent::setDefaultFrom(const Uri& from)
 {
-   mDum.getMasterProfile()->setDefaultFrom(NameAddr(from));
+   mDum->getMasterProfile()->setDefaultFrom(NameAddr(from));
 }
 
 ClientPagerMessageHandle
 DumUserAgent::makePagerMessage(const resip::NameAddr& target)
 {
-   return mDum.makePagerMessage(target);
+   return mDum->makePagerMessage(target);
 }
 
 // void 
@@ -264,25 +311,23 @@ DumUserAgent::makePagerMessage(const resip::NameAddr& target)
 // }
 
 void 
-DumUserAgent::buildFdSet(resip::FdSet& fdset)
+DumUserAgent::buildFdSet(FdSet& fdset)
 {
-   mStack.buildFdSet(fdset);
 }
 
 void 
-DumUserAgent::process(resip::FdSet& fdset)
+DumUserAgent::process(FdSet&)
 {
-   mStack.process(fdset);
    try
    {
-      while(mDum.process());
+      while(mDum->process());
    }
    catch (BaseException& e)
    {
       WarningLog (<< "Unhandled exception: " << e);
       
       // should cause the test to fail
-      assert(0);
+      resip_assert(0);
    }
 }
 
@@ -332,7 +377,7 @@ DumUserAgent::invite(const NameAddr& target,
                      DialogUsageManager::EncryptionLevel level)
 {
   resip::SharedPtr<resip::SipMessage> (resip::DialogUsageManager::*fn)(const NameAddr&, const Contents*, DialogUsageManager::EncryptionLevel, const Contents*, AppDialogSet*) = &resip::DialogUsageManager::makeInviteSession;
-  return new DumUaSendingCommand(this, boost::bind(fn, boost::ref(mDum),
+  return new DumUaSendingCommand(this, boost::bind(fn, mDum,
                                                    target, initialOffer, level, alternative, (AppDialogSet*)0));
 }
 
@@ -343,14 +388,14 @@ DumUserAgent::inviteFromRefer(const resip::SipMessage& refer,
                               resip::DialogUsageManager::EncryptionLevel level,
                               const resip::SdpContents* alternative)
 {
-  return new DumUaSendingCommand(this, boost::bind(&resip::DialogUsageManager::makeInviteSessionFromRefer, boost::ref(mDum),
+  return new DumUaSendingCommand(this, boost::bind(&resip::DialogUsageManager::makeInviteSessionFromRefer, mDum,
                                                    boost::ref(refer), boost::ref(h), initialOffer, level, alternative, (AppDialogSet*)0));
 }
 
 DumUaAction*
 DumUserAgent::subscribe(const NameAddr& target, const Data& eventType)
 {
-   return new DumUaSendingCommand(this, boost::bind(&resip::DialogUsageManager::makeSubscription, boost::ref(mDum), 
+   return new DumUaSendingCommand(this, boost::bind(&resip::DialogUsageManager::makeSubscription, mDum, 
                                                     target, eventType, (AppDialogSet*)0));
 }
 
@@ -358,54 +403,54 @@ DumUaAction*
 DumUserAgent::publish(const resip::NameAddr& target, const resip::Contents& body, 
                       const resip::Data& eventType, unsigned expiresSeconds)
 {
-   return new DumUaSendingCommand(this, boost::bind(&resip::DialogUsageManager::makePublication, boost::ref(mDum),
+   return new DumUaSendingCommand(this, boost::bind(&resip::DialogUsageManager::makePublication, mDum,
                                                     target, boost::ref(body), eventType, expiresSeconds, (AppDialogSet*)0));
 }
 
 DumUaAction*
 DumUserAgent::registerUa(bool tcp)
 {
-   NameAddr& target = mDum.getMasterUserProfile()->getDefaultFrom();
+   NameAddr& target = mDum->getMasterUserProfile()->getDefaultFrom();
    if (tcp)
    {
       target.uri().param(resip::p_transport) = "tcp";
    }
    
-   return new DumUaSendingCommand(this, boost::bind(&resip::DialogUsageManager::makeRegistration, boost::ref(mDum), 
+   return new DumUaSendingCommand(this, boost::bind(&resip::DialogUsageManager::makeRegistration, mDum, 
                                                     target, (AppDialogSet*)0));   
 }
 
 DumUaAction*
 DumUserAgent::send(resip::SharedPtr<resip::SipMessage> msg)
 {
-   return new DumUaCommand(this, boost::bind(&resip::DialogUsageManager::send, boost::ref(mDum), msg));
+   return new DumUaCommand(this, boost::bind(&resip::DialogUsageManager::send, mDum, msg));
 }
 
 DumUaAction*
 DumUserAgent::cancelInvite()
 {
-   assert(mAppDialogSet);
+   resip_assert(mAppDialogSet);
    return new DumUaCommand(this, boost::bind(&resip::AppDialogSet::end, mAppDialogSet));
 }
 
 DumUaAction*
 DumUserAgent::refer(const resip::NameAddr& target, const resip::NameAddr& referTo)
 {
-   return new DumUaSendingCommand(this, boost::bind(&resip::DialogUsageManager::makeRefer, boost::ref(mDum), target, referTo, (AppDialogSet*)0));
+   return new DumUaSendingCommand(this, boost::bind(&resip::DialogUsageManager::makeRefer, mDum, target, referTo, (AppDialogSet*)0));
 }
 
 DumUaAction*
 DumUserAgent::referNoReferSub(const resip::NameAddr& target, const resip::NameAddr& referTo)
 {
    ReferAdornment* adorner = new ReferAdornment(referTo);
-   return new DumUaSendingCommand(this, boost::bind(&resip::DialogUsageManager::makeOutOfDialogRequest, boost::ref(mDum), target, REFER, (AppDialogSet*)0), adorner);
+   return new DumUaSendingCommand(this, boost::bind(&resip::DialogUsageManager::makeOutOfDialogRequest, mDum, target, REFER, (AppDialogSet*)0), adorner);
 }
 
 DumUaAction*
 DumUserAgent::referNoReferSubWithoutReferSubHeader(const resip::NameAddr& target, const resip::NameAddr& referTo)
 {
    ReferAdornmentRemoveReferSubHeader* adorner = new ReferAdornmentRemoveReferSubHeader(referTo);
-   return new DumUaSendingCommand(this, boost::bind(&resip::DialogUsageManager::makeOutOfDialogRequest, boost::ref(mDum), target, REFER, (AppDialogSet*)0), adorner);
+   return new DumUaSendingCommand(this, boost::bind(&resip::DialogUsageManager::makeOutOfDialogRequest, mDum, target, REFER, (AppDialogSet*)0), adorner);
 }
 
 // ClientRegistrationHandler
@@ -561,12 +606,14 @@ DumUserAgent::onTerminated(InviteSessionHandle h, InviteSessionHandler::Terminat
 void
 DumUserAgent::onForkDestroyed(ClientInviteSessionHandle h)
 {
+   DebugLog(<< "onForkDestroyed");
    handleEvent(new ClientInviteEvent(this, Invite_ForkDestroyed, h));
 }
 
 void
 DumUserAgent::onRedirected(ClientInviteSessionHandle h, const SipMessage& msg)
 {
+   DebugLog(<< "onRedirected");
    handleEvent(new ClientInviteEvent(this, Invite_Redirected, h, msg));
 }
 
@@ -575,6 +622,12 @@ DumUserAgent::onAnswer(InviteSessionHandle h, const SipMessage& msg, const SdpCo
 {
    DebugLog(<< "onAnswer");
    handleEvent(new InviteEvent(this, Invite_Answer, h, msg));
+   if(mOfferToProvideInNextOnAnswerCallback.get())
+   {
+      DebugLog(<< "onAnswer - calling provideOffer from onAnswer callback");
+      h->provideOffer(*mOfferToProvideInNextOnAnswerCallback);
+      mOfferToProvideInNextOnAnswerCallback.reset();
+   }
 }
 
 void 
@@ -610,44 +663,54 @@ DumUserAgent::onOfferRejected(InviteSessionHandle h, const SipMessage* msg)
 {
    DebugLog(<< "onOfferRejected");
    if( msg )
+   {
       handleEvent(new InviteEvent(this, Invite_OfferRejected, h, *msg));
+   }
    else
+   {
       handleEvent(new InviteEvent(this, Invite_OfferRejected, h));
+   }
 }
 
 void
 DumUserAgent::onInfo(InviteSessionHandle h, const SipMessage& msg)
 {
+   DebugLog(<< "onInfo");
    handleEvent(new InviteEvent(this, Invite_Info, h, msg));
 }
 
 void
 DumUserAgent::onInfoSuccess(InviteSessionHandle h, const SipMessage& msg)
 {
+   DebugLog(<< "onInfoSuccess");
    handleEvent(new InviteEvent(this, Invite_InfoSuccess, h, msg));
 }
 
 void
 DumUserAgent::onInfoFailure(InviteSessionHandle h, const SipMessage& msg)
 {
+   DebugLog(<< "onInfoFailure");
    handleEvent(new InviteEvent(this, Invite_InfoFailure, h, msg));
 }
  
 void
 DumUserAgent::onMessage(InviteSessionHandle h, const SipMessage& msg)
 {
+   DebugLog(<< "onMessage");
    handleEvent(new InviteEvent(this, Invite_Message, h, msg));
 }
 
 void
 DumUserAgent::onMessageSuccess(InviteSessionHandle h, const SipMessage& msg)
 {
+   DebugLog(<< "onMessageSuccess");
    handleEvent(new InviteEvent(this, Invite_MessageSuccess, h, msg));
 }
  
 void
 DumUserAgent::onMessageFailure(InviteSessionHandle h, const SipMessage& msg)
 {
+   DebugLog(<< "onMessageFailure");
    handleEvent(new InviteEvent(this, Invite_MessageFailure, h, msg));
 }
 
@@ -657,7 +720,7 @@ DumUserAgent::onRefer(InviteSessionHandle h, ServerSubscriptionHandle serverSubH
    DebugLog(<< "onRefer");
    InviteEvent* event = new InviteEvent(this, Invite_Refer, h, msg, serverSubHandle);
    TestUsage* usage = findUsage(event);
-   assert(usage);
+   resip_assert(usage);
    static_cast<TestInviteSession*>(usage)->setServerSubscription(serverSubHandle);
    static_cast<TestInviteSession*>(usage)->setReferMessage(msg);
    handleEvent(event);
@@ -669,7 +732,7 @@ DumUserAgent::onReferNoSub(InviteSessionHandle h, const SipMessage& msg)
    DebugLog(<< "onReferNoSub");
    InviteEvent event(this, Invite_Refer, h, msg);
    TestUsage* usage = findUsage(&event);
-   assert(usage);
+   resip_assert(usage);
    static_cast<TestInviteSession*>(usage)->setReferMessage(msg);
    handleEvent(new InviteEvent(this, Invite_ReferNoSub, h, msg));
 }
@@ -704,7 +767,15 @@ DumUserAgent::onIllegalNegotiation(InviteSessionHandle h, const SipMessage& msg)
 void
 DumUserAgent::onSessionExpired(InviteSessionHandle h)
 {
+   DebugLog(<< "onSessionExpired");
    handleEvent(new InviteEvent(this, Invite_SessionExpired, h));
+}
+
+void 
+DumUserAgent::onPrack(ServerInviteSessionHandle h, const SipMessage &msg)
+{
+   DebugLog(<< "onPrack");
+   handleEvent(new ServerInviteEvent(this, Invite_Prack, h, msg));
 }
 
 DumUserAgent::ExpectBase* 
@@ -1479,20 +1550,20 @@ DumUserAgent::From::From(const DumUserAgent& dua)
    : mUa(&dua),
      mProxy(0)
 {
-   assert(mUa);
+   resip_assert(mUa);
 }
 
 DumUserAgent::From::From(TestProxy* proxy)
    : mUa(0),
      mProxy(proxy)
 {
-   assert(proxy);
+   resip_assert(proxy);
 }
 
 Data
 DumUserAgent::From::toString() const
 {
-   assert(mUa || mProxy);
+   resip_assert(mUa || mProxy);
 
    if (mUa)
    {
@@ -1552,14 +1623,14 @@ DumUserAgent::From::isMatch(const boost::shared_ptr<resip::SipMessage>& message)
       return true;
    }
 
-   assert(0);
+   resip_assert(0);
    return false;
 }
 
 DumUserAgent::FindMatchingDialogToReplace::FindMatchingDialogToReplace(DumUserAgent& dua)
    : mUa(&dua)
 {
-   assert(mUa);
+   resip_assert(mUa);
 }
 
 Data

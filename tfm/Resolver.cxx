@@ -19,6 +19,7 @@
 #include "resip/stack/SipStack.hxx"
 #include "rutil/Logger.hxx"
 #include "tfm/Resolver.hxx"
+#include "rutil/Errdes.hxx"
 
 #define RESIPROCATE_SUBSYSTEM resip::Subsystem::SIP
 
@@ -144,7 +145,7 @@ Resolver::lookupARecords()
 #else
 
 #ifdef WIN32
-	result = gethostbyname(mHost.c_str());
+  result = gethostbyname(mHost.c_str());
     int ret = (result==0);
 #elif defined(__NetBSD__)
     //!dcm! -- not threadsafe
@@ -166,7 +167,7 @@ Resolver::lookupARecords()
    int ret = gethostbyname_r (mHost.c_str(), &hostbuf, 
                               buffer, sizeof(buffer), &result, &herrno);
 #endif
-   assert (ret != ERANGE);
+   resip_assert (ret != ERANGE);
    if (ret != 0)
    {
 #endif
@@ -193,8 +194,8 @@ Resolver::lookupARecords()
    }
    else
    {
-      assert(result);
-      assert(result->h_length == 4);
+      resip_assert(result);
+      resip_assert(result->h_length == 4);
    
       DebugLog (<< "DNS lookup of " << mHost << ": canonical name: " << result->h_name);
       for (char** pptr = result->h_addr_list; *pptr != 0; pptr++)
@@ -211,11 +212,9 @@ void
 Resolver::lookupAandAAAARecords()
 {
    int ret=0;
-   struct addrinfo* result;
-   
 
 #if defined(__linux__) || defined(__APPLE__)   
-
+   struct addrinfo* result;
    bool ignoreV6=false;
 
    if(mHost=="localhost")
@@ -241,7 +240,7 @@ Resolver::lookupAandAAAARecords()
             if(!ignoreV6)
             {            
                struct sockaddr* addr=iter->ai_addr;
-               assert(addr->sa_family == AF_INET6);
+               resip_assert(addr->sa_family == AF_INET6);
                
                struct sockaddr_in6* theAddr=(sockaddr_in6*)addr;
                struct in6_addr theAddrReally = theAddr->sin6_addr;
@@ -257,7 +256,7 @@ Resolver::lookupAandAAAARecords()
          {
          
             struct sockaddr* addr=iter->ai_addr;
-            assert(addr->sa_family == AF_INET);
+            resip_assert(addr->sa_family == AF_INET);
             
             struct sockaddr_in* theAddr=(sockaddr_in*)addr;
             struct in_addr theAddrReally = theAddr->sin_addr;
@@ -268,7 +267,7 @@ Resolver::lookupAandAAAARecords()
          
          else
          {
-            assert(0);
+            resip_assert(0);
          }
          
          iter=iter->ai_next;
@@ -310,7 +309,7 @@ Resolver::getHostName()
    char buffer[255];
    if (gethostname(buffer, sizeof(buffer)) < 0)
    {
-      InfoLog (<< "Failed gethostname() " << strerror(errno));
+      InfoLog (<< "Failed gethostname() " << errortostringOS(errno));
       return "localhost";
    }
    else

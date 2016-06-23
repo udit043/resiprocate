@@ -6,6 +6,7 @@
 #include "rutil/Data.hxx"
 #include "rutil/KeyValueStore.hxx"
 #include "resip/dum/TlsPeerAuthManager.hxx"
+#include "repro/AclStore.hxx"
 #include "repro/Processor.hxx"
 #include "repro/Dispatcher.hxx"
 #include "repro/ProxyConfig.hxx"
@@ -22,17 +23,18 @@ namespace repro
     public:
       static resip::KeyValueStore::Key mCertificateVerifiedKey;
 
-      CertificateAuthenticator(ProxyConfig& config, resip::SipStack* stack, std::set<resip::Data>& trustedPeers, bool thirdPartyRequiresCertificate = true);
-      CertificateAuthenticator(ProxyConfig& config, resip::SipStack* stack, std::set<resip::Data>& trustedPeers, bool thirdPartyRequiresCertificate, resip::CommonNameMappings& commonNameMappings);
+      CertificateAuthenticator(ProxyConfig& config, resip::SipStack* stack, AclStore& aclStore, bool thirdPartyRequiresCertificate = true);
+      CertificateAuthenticator(ProxyConfig& config, resip::SipStack* stack, AclStore& aclStore, bool thirdPartyRequiresCertificate, resip::CommonNameMappings& commonNameMappings);
       ~CertificateAuthenticator();
 
       virtual processor_action_t process(RequestContext &);
       virtual void dump(EncodeStream &os) const;
 
     private:
-      bool authorizedForThisIdentity(const std::list<resip::Data>& peerNames, resip::Uri &fromUri);
+      bool isTrustedSource(const std::list<resip::Data>& peerNames);
+      bool authorizedForThisIdentity(RequestContext& context, const std::list<resip::Data>& peerNames, resip::Uri &fromUri);
 
-      std::set<resip::Data> mTrustedPeers;
+      AclStore& mAclStore;
       bool mThirdPartyRequiresCertificate;
       resip::CommonNameMappings mCommonNameMappings;
   };

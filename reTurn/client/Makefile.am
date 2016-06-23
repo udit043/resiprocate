@@ -10,7 +10,10 @@ SUBDIRS += test
 
 lib_LTLIBRARIES = libreTurnClient.la
 
-libreTurnClient_la_LIBADD = @LIBSSL_LIBADD@ -lrt
+libreTurnClient_la_LIBADD = ../../rutil/librutil.la
+libreTurnClient_la_LIBADD += @LIBSTL_LIBADD@
+libreTurnClient_la_LIBADD += @LIBSSL_LIBADD@
+libreTurnClient_la_LIBADD += @LIBPTHREAD_LIBADD@
 libreTurnClient_la_LDFLAGS = @LIBTOOL_VERSION_RELEASE@ -export-dynamic
 
 libreTurnClient_la_SOURCES = \
@@ -34,7 +37,7 @@ libreTurnClient_la_SOURCES = \
         TurnTlsSocket.cxx \
         TurnUdpSocket.cxx
 
-libreTurnClientincludedir = $(includedir)/reTurnClient
+libreTurnClientincludedir = $(includedir)/reTurn/client
 nobase_libreTurnClientinclude_HEADERS = ErrorCode.hxx \
 	TurnAsyncSocketHandler.hxx \
 	TurnAsyncSocket.hxx \

@@ -1,6 +1,6 @@
 # $Id$
 
-EXTRA_DIST = stunTestVectors_10_0.vcxproj stunTestVectors_10_0.vcxproj.filters
+EXTRA_DIST = *.vcxproj *.vcxproj.filters
 EXTRA_DIST += *.vcproj
 
 #AM_CXXFLAGS = -DUSE_ARES
@@ -8,7 +8,7 @@ AM_CXXFLAGS = -I $(top_srcdir)
 
 LDADD = ../client/libreTurnClient.la
 LDADD += ../../rutil/librutil.la
-LDADD += $(LIBSSL_LIBADD) -lpthread
+LDADD += $(LIBSSL_LIBADD) @LIBPTHREAD_LIBADD@
 
 TESTS = \
 	stunTestVectors

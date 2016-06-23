@@ -3,10 +3,13 @@
 
 #include "rutil/Mutex.hxx"
 #include <limits.h>
-#include <cassert>
+#include "rutil/ResipAssert.h"
 
 namespace resip
 {
+
+void sleepMs(unsigned int ms);
+void sleepSeconds(unsigned int seconds);
 
 /** Clock used for timing in the Timer class and possibly other areas.  Depending on the OS and compile settings this clock
     may not be monotonic.  Define _RESIP_MONOTONIC_CLOCK to enable monotonic timers.
@@ -154,7 +157,7 @@ class ResipClock
                      __int64 maxWait = (__int64)UINT_MAX - mBaseTimeUpdateInterval - mBaseTimeCushion;
                      if (maxWait <= 0)
                      {
-                        assert(0);
+                        resip_assert(0);
                         const_cast<UInt32 &>(mBaseTimeUpdateInterval) = 60000;
                         const_cast<UInt32 &>(mBaseTimeCushion) = 120000;
                         return UINT_MAX - mBaseTimeUpdateInterval - mBaseTimeCushion;

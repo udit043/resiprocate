@@ -1,4 +1,4 @@
-#include <cassert>
+#include "rutil/ResipAssert.h"
 
 #include <rutil/Data.hxx>
 #include <rutil/Socket.hxx>
@@ -8,6 +8,7 @@
 #include <resip/stack/Tuple.hxx>
 #include <rutil/DnsUtil.hxx>
 #include <rutil/ParseBuffer.hxx>
+#include "rutil/Errdes.hxx"
 
 #include "Version.hxx"
 #include "AppSubsystem.hxx"
@@ -30,13 +31,13 @@ HttpConnection::HttpConnection( HttpBase& base, resip::Socket pSock ):
    mSock(pSock),
    mParsedRequest(false)
 {
-	assert( mSock > 0 );
+   resip_assert( mSock > 0 );
 }
 
 
 HttpConnection::~HttpConnection()
 {
-   assert( mSock > 0 );
+   resip_assert( mSock > 0 );
 #ifdef WIN32
    closesocket(mSock); mSock=0;
 #else
@@ -145,7 +146,7 @@ HttpConnection::setPage(const Data& pPage,int response,const Mime& pType)
 
       default:
       {
-         assert(0);  
+         resip_assert(0);  
 
          Data resp;
          { 
@@ -235,10 +236,10 @@ HttpConnection::processSomeReads()
             InfoLog (<< "buf is outside your accessible address space.");
             break;
          default:
-            InfoLog (<< "Some other error");
+            InfoLog (<< "Some other error: " << e << " error message: " << errortostringOS(e) );
             break;
       }
-      InfoLog (<< "Failed read on " << (int)mSock << " " << strerror(e));
+      InfoLog (<< "Failed read on " << (int)mSock << " " << strerror(e) << " error message from Errdes.hxx file: " << errortostringOS(e) );
       return false;
    }
    else if (bytesRead == 0)
@@ -347,7 +348,7 @@ HttpConnection::processSomeWrites()
    if (bytesWritten == INVALID_SOCKET)
    {
       int e = getErrno();
-      InfoLog (<< "HttpConnection failed write on " << mSock << " " << strerror(e));
+      InfoLog (<< "HttpConnection failed write on " << mSock << " " << strerror(e) << " error message from Errdes.hxx file " << errortostringOS(e) );
 
       return false;
    }

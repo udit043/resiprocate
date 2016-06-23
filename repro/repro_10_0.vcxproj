@@ -203,6 +203,7 @@ endlocal
       </DataExecutionPrevention>
       <TargetMachine>MachineX86</TargetMachine>
       <AdditionalDependencies>Ws2_32.lib;Iphlpapi.lib;winmm.lib;Dnsapi.lib;"$(ProjectDir)..\contrib\MySQLConnectorC\lib\debug\libmysql.lib";%(AdditionalDependencies)</AdditionalDependencies>
+      <DelayLoadDLLs>libmysql.dll</DelayLoadDLLs>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -288,6 +289,7 @@ endlocal
       <DataExecutionPrevention>
       </DataExecutionPrevention>
       <TargetMachine>MachineX86</TargetMachine>
+      <DelayLoadDLLs>libmysql.dll</DelayLoadDLLs>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -374,6 +376,7 @@ endlocal
       <DataExecutionPrevention>
       </DataExecutionPrevention>
       <TargetMachine>MachineX86</TargetMachine>
+      <DelayLoadDLLs>libmysql.dll</DelayLoadDLLs>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='SSL-Debug|x64'">
@@ -460,6 +463,7 @@ endlocal
       <DataExecutionPrevention>
       </DataExecutionPrevention>
       <TargetMachine>MachineX86</TargetMachine>
+      <DelayLoadDLLs>libmysql.dll</DelayLoadDLLs>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='SSL-Release|x64'">
@@ -512,6 +516,7 @@ endlocal
     <ClCompile Include="repro.cxx" />
     <ClCompile Include="ReproRunner.cxx" />
     <ClCompile Include="ReproVersion.cxx" />
+    <ClCompile Include="SqlDb.cxx" />
     <ClCompile Include="WebAdmin.cxx" />
     <ClCompile Include="WebAdminThread.cxx" />
   </ItemGroup>
@@ -522,6 +527,7 @@ endlocal
     <ClInclude Include="MySqlDb.hxx" />
     <ClInclude Include="ReproRunner.hxx" />
     <ClInclude Include="ReproVersion.hxx" />
+    <ClInclude Include="SqlDb.hxx" />
     <ClInclude Include="WebAdmin.hxx" />
     <ClInclude Include="WebAdminThread.hxx" />
   </ItemGroup>
@@ -547,10 +553,6 @@ endlocal
     </ProjectReference>
     <ProjectReference Include="..\contrib\pcre\pcre_10_0.vcxproj">
       <Project>{b933f895-8efb-4fdd-a46d-09b8c00d1d26}</Project>
-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
-    </ProjectReference>
-    <ProjectReference Include="..\contrib\popt\popt_10_0.vcxproj">
-      <Project>{b204bd08-3991-731b-60a3-a5bd16f2b208}</Project>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
     <ProjectReference Include="..\resip\dum\dum_10_0.vcxproj">

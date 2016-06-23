@@ -1,6 +1,8 @@
 #if !defined(UserAgent_hxx)
 #define UserAgent_hxx
 
+#include <boost/function.hpp>
+
 #include "ConversationManager.hxx"
 #include "ConversationProfile.hxx"
 #include "UserAgentMasterProfile.hxx"
@@ -16,12 +18,6 @@
 #include <rutil/Log.hxx>
 #include <rutil/SharedPtr.hxx>
 #include <rutil/Mutex.hxx>
-
-#ifdef WIN32
-   #define sleepMs(t) Sleep(t)
-#else
-   #define sleepMs(t) usleep(t*1000)
-#endif
 
 namespace recon
 {
@@ -53,7 +49,8 @@ class UserAgentRegistration;
 
 class UserAgent : public resip::ClientRegistrationHandler,
                   public resip::ClientSubscriptionHandler,
-                  public resip::DumShutdownHandler
+                  public resip::DumShutdownHandler,
+                  public resip::Postable
 {
 public:
 
@@ -271,6 +268,9 @@ protected:
    // Shutdown Handler ////////////////////////////////////////////////////////////
    void onDumCanBeDeleted();
 
+   // Postable for Connection Terminated event
+   virtual void post(resip::Message* msg);
+
    // Registration Handler ////////////////////////////////////////////////////////
    virtual void onSuccess(resip::ClientRegistrationHandle h, const resip::SipMessage& response);
    virtual void onFailure(resip::ClientRegistrationHandle h, const resip::SipMessage& response);
@@ -357,6 +357,8 @@ private:
 /* ====================================================================
 
  Copyright (c) 2007-2008, Plantronics, Inc.
+ Copyright (c) 2016, SIP Spectrum, Inc.
+
  All rights reserved.
 
  Redistribution and use in source and binary forms, with or without

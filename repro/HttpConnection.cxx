@@ -1,4 +1,4 @@
-#include <cassert>
+#include "rutil/ResipAssert.h"
 
 #include "rutil/Data.hxx"
 #include "rutil/Socket.hxx"
@@ -8,6 +8,7 @@
 #include "resip/stack/Tuple.hxx"
 #include "rutil/DnsUtil.hxx"
 #include "rutil/ParseBuffer.hxx"
+#include "rutil/Errdes.hxx"
 
 #include "repro/ReproVersion.hxx"
 #include "repro/HttpBase.hxx"
@@ -31,13 +32,13 @@ HttpConnection::HttpConnection( HttpBase& base, Socket pSock ):
    mSock(pSock),
    mParsedRequest(false)
 {
-	assert( mSock > 0 );
+   resip_assert( mSock > 0 );
 }
 
 
 HttpConnection::~HttpConnection()
 {
-   assert( mSock > 0 );
+   resip_assert( mSock > 0 );
 #ifdef WIN32
    closesocket(mSock); mSock=0;
 #else
@@ -127,7 +128,7 @@ HttpConnection::setPage(const Data& pPage,int response,const Mime& pType)
       case 301:
       {
          mTxBuffer += "HTTP/1.0 301 Moved Permanently"; mTxBuffer += Symbols::CRLF;
-         mTxBuffer += "Location: http:/index.html"; mTxBuffer += Symbols::CRLF;
+         mTxBuffer += "Location: /index.html"; mTxBuffer += Symbols::CRLF;
          
          page = ("<!DOCTYPE HTML PUBLIC \"-//IETF//DTD HTML 2.0//EN\">"
                  "<html><head>"
@@ -144,9 +145,15 @@ HttpConnection::setPage(const Data& pPage,int response,const Mime& pType)
       }
       break;
 
+      case 500:
+      {
+         mTxBuffer += "HTTP/1.0 500 Server failure" ; mTxBuffer += Symbols::CRLF;
+      }
+      break;
+
       default:
       {
-         assert(0);  
+         resip_assert(0);  
 
          Data resp;
          { 
@@ -218,6 +225,9 @@ HttpConnection::processSomeReads()
       switch (e)
       {
          case EAGAIN:
+#if EAGAIN != EWOULDBLOCK
+         case EWOULDBLOCK:  // Treat EGAIN and EWOULDBLOCK as the same: http://stackoverflow.com/questions/7003234/which-systems-define-eagain-and-ewouldblock-as-different-values
+#endif
             InfoLog (<< "No data ready to read");
             return true;
          case EINTR:
@@ -239,7 +249,7 @@ HttpConnection::processSomeReads()
             InfoLog (<< "Some other error");
             break;
       }
-      InfoLog (<< "Failed read on " << (int)mSock << " " << strerror(e));
+      InfoLog (<< "Failed read on " << (int)mSock << " " << errortostringOS(e));
       return false;
    }
    else if (bytesRead == 0)
@@ -357,7 +367,7 @@ HttpConnection::processSomeWrites()
    if (bytesWritten == INVALID_SOCKET)
    {
       int e = getErrno();
-      InfoLog (<< "HttpConnection failed write on " << mSock << " " << strerror(e));
+      InfoLog (<< "HttpConnection failed write on " << mSock << " " << strerror(e) << " error message from Errdes.hxx file : " << errortostringOS(e) );
 
       return false;
    }

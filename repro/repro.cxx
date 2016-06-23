@@ -18,10 +18,20 @@ using namespace resip;
 using namespace std;
 
 static bool finished = false;
+static bool receivedHUP = false;
 
 static void
 signalHandler(int signo)
 {
+#ifndef _WIN32
+   if(signo == SIGHUP)
+   {
+      InfoLog(<<"Received HUP signal, logger reset");
+      Log::reset();
+      receivedHUP = true;
+      return;
+   }
+#endif
    std::cerr << "Shutting down" << endl;
    finished = true;
 }
@@ -101,6 +111,11 @@ main(int argc, char** argv)
       cerr << "Couldn't install signal handler for SIGPIPE" << endl;
       exit(-1);
    }
+   if ( signal( SIGHUP, signalHandler ) == SIG_ERR )
+   {
+      cerr << "Couldn't install signal handler for SIGHUP" << endl;
+      exit( -1 );
+   }
 #endif
 
    if ( signal( SIGINT, signalHandler ) == SIG_ERR )
@@ -132,11 +147,12 @@ main(int argc, char** argv)
    // Main program thread, just waits here for a signal to shutdown
    while (!finished)
    {
-#ifdef WIN32
-   Sleep(1000);
-#else
-   usleep(100000);
-#endif
+      sleepMs(1000);
+      if(receivedHUP)
+      {
+         repro.onHUP();
+         receivedHUP = false;
+      }
    }
 
    repro.shutdown();

@@ -8,7 +8,7 @@
 #include <iostream>
 #include <string>
 #include <bitset>
-#include <cassert>
+#include "rutil/ResipAssert.h"
 
 #include "rutil/compat.hxx"
 #include "rutil/DataStream.hxx"
@@ -187,7 +187,7 @@ class Data
         that value. (E.g. "Data(75)" will create a Data
         with length=2, and contents of 0x37 0x35).
       */
-      explicit Data(int value);
+      explicit Data(Int32 value);
 
       /**
         Converts the passed in value into ascii-decimal
@@ -195,15 +195,7 @@ class Data
         that value. (E.g. "Data(75)" will create a Data
         with length=2, and contents of 0x37 0x35).
       */
-      explicit Data(unsigned long value);
-
-      /**
-        Converts the passed in value into ascii-decimal
-        representation, and then creates a "Data" containing
-        that value. (E.g. "Data(75)" will create a Data
-        with length=2, and contents of 0x37 0x35).
-      */
-      explicit Data(unsigned int value);
+      explicit Data(UInt32 value);
 
       /**
         Converts the passed in value into ascii-decimal
@@ -355,7 +347,15 @@ class Data
 
       /**
         Functional equivalent of: *this = Data(buf, length)
-        but avoid the intermediate allocation and free. Also,
+        and Data& copy(const char *buf, size_type length)
+        but avoids an actual copy of the data if {other} is Shared
+        or Borrowed.  Will have the same storage mode as {other}.
+      **/
+      Data& duplicate(const Data& other);
+
+      /**
+        Functional equivalent of: *this = Data(buf, length)
+        but avoids the intermediate allocation and free. Also,
         will never decrease capacity. Safe to call even if {buf}
         is part of {this}.
 
@@ -463,7 +463,7 @@ class Data
       */
       inline Data& operator+=(const char* str)
       {
-         assert(str);
+         resip_assert(str);
          return append(str, (size_type)strlen(str));
       }
 
@@ -491,7 +491,7 @@ class Data
       */
       inline char& operator[](size_type p)
       {
-         assert(p < mSize);
+         resip_assert(p < mSize);
          own();
          return mBuf[p];
       }
@@ -501,7 +501,7 @@ class Data
       */
       inline char operator[](size_type p) const
       {
-         assert(p < mSize);
+         resip_assert(p < mSize);
          return mBuf[p];
       }
 
@@ -649,6 +649,11 @@ class Data
         this Data.
       */
       Data hex() const;
+
+      /**
+        Returns the binary form of the hexadecimal string in this Data
+      */
+      Data fromHex() const;
 
       /**
         Returns a representation of the contents of the data
@@ -943,11 +948,18 @@ class Data
       std::ostream& escapeToStream(std::ostream& str, 
                                    const std::bitset<256>& shouldEscape) const;
 
+      static Data fromFile(const Data& filename);
+
    private:
       /**
         @deprecated use Data(ShareEnum ...)
       */
       Data(const char* buffer, size_type length, bool);
+
+      /**
+        Used by string constructors
+      */
+      inline void initFromString(const char* str, size_type len);
 
       /**
         Copies the contents of this data to a new buffer if the

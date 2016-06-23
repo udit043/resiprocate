@@ -57,7 +57,8 @@ SipStack::SipStack(const SipStackOptions& options) :
                 TransactionController::MaxTUFifoSize),
         mTuSelector(mTUFifo),
         mAppTimers(mTuSelector),
-        mStatsManager(*this)
+        mStatsManager(*this),
+        mNextTransportKey(1)
 {
    // WARNING - don't forget to add new member initialization to the init() method
    init(options);
@@ -72,7 +73,15 @@ SipStack::SipStack(Security* pSecurity,
                    AfterSocketCreationFuncPtr socketFunc,
                    Compression *compression,
                    FdPollGrp *pollGrp) :
+#ifdef WIN32
+   // If PollGrp is not passed in, then EventStackThead isn't being used and application
+   // is most likely implementing a select/process loop to drive the stack - in this case
+   // we want windows to default to fdset implementation, since the Poll implementation on
+   // windows does not support the select/process loop
+   mPollGrp(pollGrp?pollGrp:FdPollGrp::create("fdset")),
+#else
    mPollGrp(pollGrp?pollGrp:FdPollGrp::create()),
+#endif
    mPollGrpIsMine(!pollGrp),
 #ifdef USE_SSL
    mSecurity( pSecurity ? pSecurity : new Security()),
@@ -93,10 +102,12 @@ SipStack::SipStack(Security* pSecurity,
    mTransactionController(new TransactionController(*this, mAsyncProcessHandler)),
    mTransactionControllerThread(0),
    mTransportSelectorThread(0),
-   mRunning(false),
+   mInternalThreadsRunning(false),
+   mProcessingHasStarted(false),
    mShuttingDown(false),
    mStatisticsManagerEnabled(true),
-   mSocketFunc(socketFunc)
+   mSocketFunc(socketFunc),
+   mNextTransportKey(1)
 {
    Timer::getTimeMs(); // initalize time offsets
    Random::initialize();
@@ -106,7 +117,7 @@ SipStack::SipStack(Security* pSecurity,
 #ifdef USE_SSL
       pSecurity->preload();
 #else
-      assert(0);
+      resip_assert(0);
 #endif
    }
    
@@ -144,7 +155,15 @@ SipStack::init(const SipStackOptions& options)
    }
    else
    {
+#ifdef WIN32
+      // If PollGrp is not passed in, then EventStackThead isn't being used and application
+      // is most likely implementing a select/process loop to drive the stack - in this case
+      // we want windows to default to fdset implementation, since the Poll implementation on
+      // windows does not support the select/process loop
+      mPollGrp = FdPollGrp::create("fdset");
+#else
       mPollGrp = FdPollGrp::create();
+#endif
       mPollGrpIsMine=true;
    }
 
@@ -153,7 +172,7 @@ SipStack::init(const SipStackOptions& options)
    mSecurity->preload();
 #else
    mSecurity = 0;
-   assert(options.mSecurity==0);
+   resip_assert(options.mSecurity==0);
 #endif
 
    if(options.mAsyncProcessHandler)
@@ -187,7 +206,8 @@ SipStack::init(const SipStackOptions& options)
    mTransactionControllerThread = 0;
    mTransportSelectorThread = 0;
 
-   mRunning = false;
+   mInternalThreadsRunning = false;
+   mProcessingHasStarted = false;
    mShuttingDown = false;
    mStatisticsManagerEnabled = true;
    mSocketFunc = options.mSocketFunc;
@@ -229,18 +249,17 @@ SipStack::~SipStack()
       delete mAsyncProcessHandler;
       mAsyncProcessHandler=0;
    }
-
 }
 
 void 
 SipStack::run()
 {
-   if(mRunning)
+   if(mInternalThreadsRunning)
    {
       return;
    }
 
-   mRunning=true;
+   mInternalThreadsRunning=true;
    delete mDnsThread;
    mDnsThread=new DnsThread(*mDnsStub);
    mDnsThread->run();
@@ -261,7 +280,7 @@ SipStack::shutdown()
 
    {
       Lock lock(mShutdownMutex);
-      assert(!mShuttingDown);
+      resip_assert(!mShuttingDown);
       mShuttingDown = true;
    }
 
@@ -288,7 +307,7 @@ SipStack::shutdownAndJoinThreads()
       mTransportSelectorThread->shutdown();
       mTransportSelectorThread->join();
    }
-   mRunning=false;
+   mInternalThreadsRunning=false;
 }
 
 Transport*
@@ -301,10 +320,14 @@ SipStack::addTransport( TransportType protocol,
                         const Data& privateKeyPassPhrase,
                         SecurityTypes::SSLType sslType,
                         unsigned transportFlags,
+                        const Data& certificateFilename, const Data& privateKeyFilename,
                         SecurityTypes::TlsClientVerificationMode cvm,
-                        bool useEmailAsSIP)
+                        bool useEmailAsSIP,
+                        SharedPtr<WsConnectionValidator> wsConnectionValidator,
+                        SharedPtr<WsCookieContextFactory> wsCookieContextFactory,
+                        const Data& netNs)
 {
-   assert(!mShuttingDown);
+   resip_assert(!mShuttingDown);
 
    // If address is specified, ensure it is valid
    if(!ipInterface.empty())
@@ -331,6 +354,14 @@ SipStack::addTransport( TransportType protocol,
       }
    }
 
+#ifdef USE_NETNS
+   if(!netNs.empty() && protocol != TCP)
+   {
+      ErrLog(<< "Failed to create transport, netns is currently only supported for TCP.  Cannot use netns: " << netNs);
+      throw Transport::Exception("netns only supported for TCP", __FILE__,__LINE__);
+   }
+#endif
+
    InternalTransport* transport=0;
    Fifo<TransactionMessage>& stateMacFifo = mTransactionController->transportSelector().stateMacFifo();
    try
@@ -341,7 +372,8 @@ SipStack::addTransport( TransportType protocol,
             transport = new UdpTransport(stateMacFifo, port, version, stun, ipInterface, mSocketFunc, *mCompression, transportFlags);
             break;
          case TCP:
-            transport = new TcpTransport(stateMacFifo, port, version, ipInterface, mSocketFunc, *mCompression, transportFlags);
+            transport = 
+               new TcpTransport(stateMacFifo, port, version, ipInterface, mSocketFunc, *mCompression, transportFlags, netNs);
             break;
          case TLS:
 #if defined( USE_SSL )
@@ -356,10 +388,13 @@ SipStack::addTransport( TransportType protocol,
                                          *mCompression,
                                          transportFlags,
                                          cvm,
-                                         useEmailAsSIP);
+                                         useEmailAsSIP,
+                                         certificateFilename, 
+                                         privateKeyFilename,
+                                         privateKeyPassPhrase);
 #else
-            CritLog (<< "TLS not supported in this stack. You don't have openssl");
-            assert(0);
+            CritLog (<< "Can't add TLS transport: TLS not supported in this stack. You don't have openssl.");
+            throw Transport::Exception("Can't add TLS transport: TLS not supported in this stack. You don't have openssl.", __FILE__,__LINE__);
 #endif
             break;
          case DTLS:
@@ -371,27 +406,28 @@ SipStack::addTransport( TransportType protocol,
                                           *mSecurity,
                                           sipDomainname,
                                           mSocketFunc,
-                                          *mCompression);
+                                          *mCompression,
+                                          certificateFilename, 
+                                          privateKeyFilename,
+                                          privateKeyPassPhrase);
 #else
-            CritLog (<< "DTLS not supported in this stack.");
-            assert(0);
+            CritLog (<< "Can't add DTLS transport: DTLS not supported in this stack.");
+            throw Transport::Exception("Can't add DTLS transport: DTLS not supported in this stack.", __FILE__,__LINE__);
 #endif
             break;
 
          case WS:
-#if defined( USE_SSL )
             transport = new WsTransport(stateMacFifo, 
                   port,
                   version,
                   ipInterface,
                   mSocketFunc,
                   *mCompression,
-                  transportFlags);
-#else
-            CritLog (<< "WebSockets not supported in this stack. You don't have openssl");
-            assert(0);
-#endif
+                  transportFlags,
+                  wsConnectionValidator,
+                  wsCookieContextFactory);
             break;
+
          case WSS:
 #if defined( USE_SSL )
             transport = new WssTransport(stateMacFifo,
@@ -405,14 +441,20 @@ SipStack::addTransport( TransportType protocol,
                   *mCompression,
                   transportFlags,
                   cvm,
-                  useEmailAsSIP);
+                  useEmailAsSIP,
+                  wsConnectionValidator,
+                  wsCookieContextFactory,
+                  certificateFilename, 
+                  privateKeyFilename,
+                  privateKeyPassPhrase);
 #else
-            CritLog (<< "WSS not supported in this stack. You don't have openssl");
-            assert(0);
+            CritLog (<< "Can't add WSS transport: Secure Websockets not supported in this stack. You don't have openssl.");
+            throw Transport::Exception("Can't add WSS transport: Secure Websockets not supported in this stack. You don't have openssl.", __FILE__,__LINE__);
 #endif
             break;
          default:
-            assert(0);
+            CritLog (<< "Can't add unknown transport.");
+            throw Transport::Exception("Can't add unknown transport.", __FILE__,__LINE__);
             break;
       }
    }
@@ -432,7 +474,50 @@ SipStack::addTransport( TransportType protocol,
 void
 SipStack::addTransport(std::auto_ptr<Transport> transport)
 {
-   //.dcm. once addTransport starts throwing, need to back out alias
+   // Ensure we will be able to add the transport in the transport selector by ensure we
+   // don't have any transport collisions.  Note:  We store two set's here in order to 
+   // avoid needing to ask the TransportSelector under some form of locking.
+   Tuple tuple(transport->interfaceName(), transport->port(),
+               transport->ipVersion(), transport->transport(),
+               Data::Empty, // target domain
+               transport->netNs());
+   if(!isSecure(transport->transport()))
+   {
+      if(mNonSecureTransports.count(tuple) == 0)
+      {
+         // All is good - assign key to transport then add to mNonSecureTransports list
+         transport->setKey(mNextTransportKey++);
+         tuple.mTransportKey = transport->getKey();
+         mNonSecureTransports[tuple] = transport.get();
+      }
+      else
+      {
+         // Nonsecure transport collision with existing transport
+         ErrLog(<< "Failed to add non-secure transport, transport with similar properties already exists: " << tuple);
+         throw Transport::Exception("Failed to add non-secure transport, transport with similar properties already exists.", __FILE__,__LINE__);
+         return;
+      }
+   }
+   else
+   {
+      tuple.setTargetDomain(transport->tlsDomain());
+      TransportSelector::TlsTransportKey tlsKey(tuple);
+      if(mSecureTransports.count(tlsKey) == 0)
+      {
+         // All is good - assign key to transport then add to mNonSecureTransports list
+         transport->setKey(mNextTransportKey++);
+         tlsKey.mTuple.mTransportKey = transport->getKey();
+         mSecureTransports[tlsKey] = transport.get();
+      }
+      else
+      {
+         // Secure transport collision with existing transport
+         ErrLog(<< "Failed to add secure transport, transport with similar properties already exists: " << tuple);
+         throw Transport::Exception("Failed to add secure transport, transport with similar properties already exists.", __FILE__,__LINE__);
+         return;
+      }
+   }
+
    if (!transport->interfaceName().empty())
    {
       addAlias(transport->interfaceName(), transport->port());
@@ -447,16 +532,136 @@ SipStack::addTransport(std::auto_ptr<Transport> transport)
       }
       while(!ipIfs.empty())
       {
-         if(DnsUtil::isIpV4Address(ipIfs.back().second)==
-                                             (transport->ipVersion()==V4))
+         if(DnsUtil::isIpV4Address(ipIfs.back().second) == (transport->ipVersion()==V4))
          {
             addAlias(ipIfs.back().second, transport->port());
          }
          ipIfs.pop_back();
       }
    }
-   mPorts.insert(transport->port());
-   mTransactionController->transportSelector().addTransport(transport,true);
+   { 
+      Lock lock(mPortsMutex);
+      mPorts[transport->port()]++;  // add port / increment reference count
+   }
+
+   // Add to CongestionManager if required
+   if(mCongestionManager)
+   {
+       transport->setCongestionManager(mCongestionManager);
+   }
+
+   // Set Sip Message Logging Handler if one was provided
+   if(mTransportSipMessageLoggingHandler.get())
+   {
+       transport->setSipMessageLoggingHandler(mTransportSipMessageLoggingHandler);
+   }
+
+   if(mProcessingHasStarted)
+   {
+       // Stack is running.  Need to queue add request for TransactionController Thread
+       mTransactionController->addTransport(transport);
+   }
+   else
+   {
+       // Stack isn't running yet - just add transport directly on transport selector from this thread
+       mTransactionController->transportSelector().addTransport(transport, false /* isStackRunning */); 
+   }
+}
+
+void 
+SipStack::removeTransport(unsigned int transportKey)
+{
+   Tuple removeTuple;
+   Transport* transportToRemove = 0;
+
+   // Find transport using Key in SipStack lists(sets)
+   for(NonSecureTransportMap::iterator itNS = mNonSecureTransports.begin(); itNS != mNonSecureTransports.end(); itNS++)
+   {
+      if(itNS->first.mTransportKey == transportKey)
+      {
+         removeTuple = itNS->first;
+         transportToRemove = itNS->second;
+         mNonSecureTransports.erase(itNS);
+         break;
+      }
+   }
+   // If not found look in Secure list(set)
+   if(!transportToRemove)
+   {
+      for(SecureTransportMap::iterator itS = mSecureTransports.begin(); itS != mSecureTransports.end(); itS++)
+      {
+         if(itS->first.mTuple.mTransportKey == transportKey)
+         {
+            removeTuple = itS->first.mTuple;
+            transportToRemove = itS->second;
+            mSecureTransports.erase(itS);
+            break;
+         }
+      }
+   }
+   if(!transportToRemove)
+   {
+      WarningLog (<< "removeTransport: could not find transport specified by transportKey=" << transportKey);
+      return;
+   }
+
+   if(mSecureTransports.size() == 0 && mNonSecureTransports.size() == 0)
+   {
+      // If we have no more transports we can just clear out the mDomains map and mUri
+      Lock lock(mDomainsMutex);
+      mDomains.clear();
+      mUri.host().clear();
+      mUri.port() = 0;
+   }
+   else if(!transportToRemove->interfaceName().empty())
+   {
+      removeAlias(transportToRemove->interfaceName(), transportToRemove->port());
+   }
+   else
+   {
+      // Warning:  This removal could produce unexpected results if the querying of the 
+      // current interface addresses yields a different result then when we added the 
+      // transport.
+      // Using INADDR_ANY, get all IP interfaces
+      std::list<std::pair<Data, Data> > ipIfs(DnsUtil::getInterfaces());
+      if(transportToRemove->ipVersion()==V4)
+      {
+         ipIfs.push_back(std::make_pair<Data,Data>("lo0","127.0.0.1"));
+      }
+      while(!ipIfs.empty())
+      {
+         if(DnsUtil::isIpV4Address(ipIfs.back().second) == (transportToRemove->ipVersion()==V4))
+         {
+            removeAlias(ipIfs.back().second, transportToRemove->port());
+         }
+         ipIfs.pop_back();
+      }
+   }
+   
+   // Remove from port map if reference count is 0
+   {
+      Lock lock(mPortsMutex);
+      std::map<int, unsigned int>::iterator itP = mPorts.find(transportToRemove->port());
+      if(itP != mPorts.end())
+      {
+         // Decrement reference count and erase if 0
+         if(--itP->second == 0)
+         {
+            mPorts.erase(itP);
+         }
+      }
+   }
+
+   if(mProcessingHasStarted)
+   {
+       // Stack is running.  Need to queue remove request for TransactionController Thread
+       mTransactionController->removeTransport(transportKey);
+   }
+   else
+   {
+       // Stack isn't running yet - just remove transport directly on transport selector from this thread
+       mTransactionController->transportSelector().removeTransport(transportKey); 
+   }
 }
 
 Fifo<TransactionMessage>&
@@ -471,15 +676,39 @@ SipStack::addAlias(const Data& domain, int port)
    int portToUse = (port == 0) ? Symbols::DefaultSipPort : port;
 
    DebugLog (<< "Adding domain alias: " << domain << ":" << portToUse);
-   assert(!mShuttingDown);
-   mDomains.insert(domain + ":" + Data(portToUse));
+   resip_assert(!mShuttingDown);
 
+   Lock lock(mDomainsMutex);
+   mDomains[domain + ":" + Data(portToUse)]++;
 
    if(mUri.host().empty())
    {
-      mUri.host()=*mDomains.begin();
+      mUri.host() = domain;
+      mUri.port() = portToUse;
+   }
+}
+
+void
+SipStack::removeAlias(const Data& domain, int port)
+{
+   int portToUse = (port == 0) ? Symbols::DefaultSipPort : port;
+
+   DebugLog (<< "Removing domain alias: " << domain << ":" << portToUse);
+   resip_assert(!mShuttingDown);
+
+   Lock lock(mDomainsMutex);
+   DomainsMap::iterator it = mDomains.find(domain + ":" + Data(portToUse));
+   if(it != mDomains.end())
+   {
+      if(--it->second == 0)
+      {
+         mDomains.erase(it);
+      }
    }
 
+   // TODO - could reset mUri to be first item in Domain map - would need
+   // to seperate domain name and port though.  Not sure who is using mUri
+   // anyway.
 }
 
 Data
@@ -492,7 +721,7 @@ SipStack::getHostname()
    {
       ErrLog(<< "gethostname failed with return " << err << " Returning "
             "\"localhost\"");
-      assert(0);
+      resip_assert(0);
       return "localhost";
    }
    
@@ -504,10 +733,10 @@ SipStack::getHostname()
       ErrLog( << "gethostbyname failed - name server is probably down" );
       return "localhost";
    }
-   assert( hostEnt );
+   resip_assert( hostEnt );
 
    struct in_addr* addr = (struct in_addr*) hostEnt->h_addr_list[0];
-   assert( addr );
+   resip_assert( addr );
 
    // if you change this, please #def old version for windows
    char* addrA = inet_ntoa( *addr );
@@ -529,7 +758,7 @@ SipStack::getHostAddress()
    {
       ErrLog(<< "gethostname failed with return " << err << " Returning "
             "\"127.0.0.1\"");
-      assert(0);
+      resip_assert(0);
       return "127.0.0.1";
    }
    
@@ -537,7 +766,7 @@ SipStack::getHostAddress()
    if(!hostEnt)
    {
       ErrLog(<< "gethostbyname failed, returning \"127.0.0.1\"");
-      assert(0);
+      resip_assert(0);
       return "127.0.0.1";
    }
    
@@ -546,7 +775,7 @@ SipStack::getHostAddress()
    {
       ErrLog(<< "gethostbyname returned a hostent* with an empty h_addr_list,"
                " returning \"127.0.0.1\"");
-      assert(0);
+      resip_assert(0);
       return "127.0.0.1";
    }
    
@@ -562,6 +791,7 @@ SipStack::getHostAddress()
 bool
 SipStack::isMyDomain(const Data& domain, int port) const
 {
+   Lock lock(mDomainsMutex);
    return (mDomains.count(domain + ":" +
                           Data(port == 0 ? Symbols::DefaultSipPort : port)) != 0);
 }
@@ -569,12 +799,14 @@ SipStack::isMyDomain(const Data& domain, int port) const
 bool
 SipStack::isMyPort(int port) const
 {
+   Lock lock(mPortsMutex);
    return mPorts.count(port) != 0;
 }
 
 const Uri&
 SipStack::getUri() const
 {
+   Lock lock(mDomainsMutex);
    if(mUri.host().empty())
    {
       CritLog(<< "There are no associated transports");
@@ -628,7 +860,7 @@ SipStack::sendTo(std::auto_ptr<SipMessage> msg, const Uri& uri, TransactionUser*
 void
 SipStack::sendTo(std::auto_ptr<SipMessage> msg, const Tuple& destination, TransactionUser* tu)
 {
-   assert(!mShuttingDown);
+   resip_assert(!mShuttingDown);
 
    if (tu) msg->setTransactionUser(tu);
    msg->setDestination(destination);
@@ -657,7 +889,7 @@ SipStack::sendTo(const SipMessage& msg, const Uri& uri, TransactionUser* tu)
 void
 SipStack::sendTo(const SipMessage& msg, const Tuple& destination, TransactionUser* tu)
 {
-   assert(!mShuttingDown);
+   resip_assert(!mShuttingDown);
 
    SipMessage* toSend = static_cast<SipMessage*>(msg.clone());
    if (tu) toSend->setTransactionUser(tu);
@@ -679,14 +911,14 @@ SipStack::checkAsyncProcessHandler()
 void
 SipStack::post(std::auto_ptr<ApplicationMessage> message)
 {
-   assert(!mShuttingDown);
+   resip_assert(!mShuttingDown);
    mTuSelector.add(message.release(), TimeLimitFifo<Message>::InternalElement);
 }
 
 void
 SipStack::post(const ApplicationMessage& message)
 {
-   assert(!mShuttingDown);
+   resip_assert(!mShuttingDown);
    Message* toPost = message.clone();
    mTuSelector.add(toPost, TimeLimitFifo<Message>::InternalElement);
 }
@@ -695,7 +927,7 @@ void
 SipStack::post(const ApplicationMessage& message,  unsigned int secondsLater,
                TransactionUser* tu)
 {
-   assert(!mShuttingDown);
+   resip_assert(!mShuttingDown);
    postMS(message, secondsLater*1000, tu);
 }
 
@@ -703,7 +935,7 @@ void
 SipStack::postMS(const ApplicationMessage& message, unsigned int ms,
                  TransactionUser* tu)
 {
-   assert(!mShuttingDown);
+   resip_assert(!mShuttingDown);
    Message* toPost = message.clone();
    if (tu) toPost->setTransactionUser(tu);
    Lock lock(mAppTimerMutex);
@@ -727,7 +959,7 @@ SipStack::postMS( std::auto_ptr<ApplicationMessage> message,
                   unsigned int ms,
                   TransactionUser* tu)
 {
-   assert(!mShuttingDown);
+   resip_assert(!mShuttingDown);
    if (tu) message->setTransactionUser(tu);
    Lock lock(mAppTimerMutex);
    mAppTimers.add(ms, message.release());
@@ -816,11 +1048,6 @@ SipStack::setFallbackPostNotify(AsyncProcessHandler *handler)
 void
 SipStack::processTimers()
 {
-   if(!mShuttingDown && mStatisticsManagerEnabled)
-   {
-      mStatsManager.process();
-   }
-
    if(!mTransactionControllerThread)
    {
       mTransactionController->process();
@@ -865,6 +1092,7 @@ unsigned int
 SipStack::getTimeTillNextProcessMS()
 {
    Lock lock(mAppTimerMutex);
+   mProcessingHasStarted = true;
 
    unsigned int dnsNextProcess = (mDnsThread ? 
                            INT_MAX : mDnsStub->getTimeTillNextProcessMS());
@@ -1000,24 +1228,28 @@ SipStack::statisticsManagerEnabled() const
 EncodeStream&
 SipStack::dump(EncodeStream& strm)  const
 {
-   Lock lock(mAppTimerMutex);
-   strm << "SipStack: " << (this->mSecurity ? "with security " : "without security ")
-        << std::endl
-        << "domains: " << Inserter(this->mDomains)
-        << std::endl
-        << " TUFifo size=" << this->mTUFifo.size() << std::endl
-        << " Timers size=" << this->mTransactionController->mTimers.size() << std::endl
-        << " AppTimers size=" << this->mAppTimers.size() << std::endl
-        << " ServerTransactionMap size=" << this->mTransactionController->mServerTransactionMap.size() << std::endl
+   strm << "SipStack: " << (this->mSecurity ? "with security " : "without security ") << std::endl;
+   {
+      Lock lock(mDomainsMutex);
+      strm << "domains: " << Inserter(this->mDomains) << std::endl;
+   }
+   strm << " TUFifo size=" << this->mTUFifo.size() << std::endl
+        << " Timers size=" << this->mTransactionController->mTimers.size() << std::endl;
+   {
+      Lock lock(mAppTimerMutex);
+      strm << " AppTimers size=" << this->mAppTimers.size() << std::endl;
+   }
+   strm << " ServerTransactionMap size=" << this->mTransactionController->mServerTransactionMap.size() << std::endl
         << " ClientTransactionMap size=" << this->mTransactionController->mClientTransactionMap.size() << std::endl
+        // !slg! TODO - There is technically a threading concern with the following three lines and the runtime addTransport call
         << " Exact Transports=" << Inserter(this->mTransactionController->mTransportSelector.mExactTransports) << std::endl
-        << " Any Transports=" << Inserter(this->mTransactionController->mTransportSelector.mAnyInterfaceTransports) << std::endl;
+        << " Any Transports=" << Inserter(this->mTransactionController->mTransportSelector.mAnyInterfaceTransports) << std::endl
+        << " TLS Transports=" << Inserter(this->mTransactionController->mTransportSelector.mTlsTransports) << std::endl;
    return strm;
 }
 
 EncodeStream&
-resip::operator<<(EncodeStream& strm,
-const SipStack& stack)
+resip::operator<<(EncodeStream& strm, const SipStack& stack)
 {
    return stack.dump(strm);
 }

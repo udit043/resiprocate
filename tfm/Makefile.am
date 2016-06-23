@@ -3,7 +3,7 @@
 EXTRA_DIST = LICENSE
 EXTRA_DIST += README
 EXTRA_DIST += tfm.sln
-EXTRA_DIST += tfcommon
+EXTRA_DIST += *.vcxproj *.vcxproj.filters
 EXTRA_DIST += *.vcproj
 
 # autotools won't build the contrib stuff
@@ -24,7 +24,7 @@ libtfm_la_LIBADD = ../repro/librepro.la
 libtfm_la_LIBADD += ../resip/dum/libdum.la
 libtfm_la_LIBADD += ../resip/stack/libresip.la
 libtfm_la_LIBADD += ../rutil/librutil.la
-libtfm_la_LIBADD += @LIBSSL_LIBADD@ -lpthread -ldb_cxx -lcppunit -lNetxx
+libtfm_la_LIBADD += @LIBSSL_LIBADD@ @LIBPTHREAD_LIBADD@ -ldb_cxx -lcppunit -lNetxx
 
 libtfm_la_SOURCES = ActionBase.cxx \
         CppTestSelector.cxx \

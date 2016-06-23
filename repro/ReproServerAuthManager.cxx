@@ -1,4 +1,4 @@
-#include <cassert>
+#include "rutil/ResipAssert.h"
 
 #include "resip/dum/DialogUsageManager.hxx"
 #include "repro/ReproServerAuthManager.hxx"
@@ -18,8 +18,9 @@ ReproServerAuthManager::ReproServerAuthManager(DialogUsageManager& dum,
                                                AclStore& aclDb,
                                                bool useAuthInt,
                                                bool rejectBadNonces,
-                                               bool challengeThirdParties):
-   ServerAuthManager(dum, dum.dumIncomingTarget(), challengeThirdParties),
+                                               bool challengeThirdParties,
+                                               const Data& staticRealm):
+   ServerAuthManager(dum, dum.dumIncomingTarget(), challengeThirdParties, staticRealm),
    mDum(dum),
    mAuthRequestDispatcher(authRequestDispatcher),
    mAclDb(aclDb),
@@ -47,7 +48,7 @@ ReproServerAuthManager::rejectBadNonces() const
 ServerAuthManager::AsyncBool
 ReproServerAuthManager::requiresChallenge(const SipMessage& msg)
 {
-   assert(msg.isRequest());
+   resip_assert(msg.isRequest());
    if(!mAclDb.isRequestTrusted(msg))
    {
       return ServerAuthManager::requiresChallenge(msg);

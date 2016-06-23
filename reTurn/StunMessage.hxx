@@ -5,6 +5,9 @@
 #include <rutil/compat.hxx>
 #include <rutil/Data.hxx>
 #include <asio.hpp>
+#ifdef USE_SSL
+#include <asio/ssl.hpp>
+#endif
 
 #include "StunTuple.hxx"
 
@@ -60,6 +63,7 @@ public:
    void generateShortTermPasswordForUsername(resip::Data& password);  // Ensure username is set first
    void getTupleFromUsername(StunTuple& tuple);   // note: does not set transport type
    void calculateHmacKey(resip::Data& hmacKey, const resip::Data& longtermAuthenticationPassword);
+   void calculateHmacKeyForHa1(resip::Data& hmacKey, const resip::Data& ha1);
    void calculateHmacKey(resip::Data& hmacKey, const resip::Data& username, const resip::Data& realm, const resip::Data& longtermAuthenticationPassword);
    bool checkMessageIntegrity(const resip::Data& hmacKey);
    bool checkFingerprint();
@@ -367,6 +371,7 @@ private:
 
    char* encode16(char* buf, UInt16 data);
    char* encode32(char* buf, UInt32 data);
+   char* encode64(char* buf, const UInt64 data);
    char* encode(char* buf, const char* data, unsigned int length);
    char* encodeTurnData(char *ptr, const resip::Data* td);
    char* encodeAtrUInt32(char* ptr, UInt16 type, UInt32 value);

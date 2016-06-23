@@ -3,13 +3,15 @@
   #include "config.h"
 #endif
 
+#include <boost/crc.hpp>
+
 #include "StunMessage.hxx"
 
+#include <rutil/compat.hxx>
 #include <rutil/Timer.hxx>
 #include <rutil/Random.hxx>
 #include <rutil/DataStream.hxx>
 #include <rutil/MD5Stream.hxx>
-#include <boost/crc.hpp>
 #include <rutil/WinLeakCheck.hxx>
 #include <rutil/Logger.hxx>
 #include "ReTurnSubsystem.hxx"
@@ -97,7 +99,7 @@ StunMessage::operator=(const StunMessage& rhs)
 {
    if (this != &rhs)
    {
-      assert(false);
+      resip_assert(false);
    }
 
    return *this;
@@ -180,7 +182,7 @@ StunMessage::createHeader(UInt16 stunclass, UInt16 method)
 void 
 StunMessage::setErrorCode(unsigned short errorCode, const char* reason)
 {
-   assert(errorCode >= 100 && errorCode <= 699);
+   resip_assert(errorCode >= 100 && errorCode <= 699);
    mHasErrorCode = true;
    mErrorCode.errorClass = errorCode / 100;
    mErrorCode.number = errorCode % 100;
@@ -336,7 +338,7 @@ StunMessage::setStunAtrAddressFromTuple(StunAtrAddress& address, const StunTuple
    {
       // Note:  addr.ipv6 is stored in network byte order
       address.family = StunMessage::IPv6Family;  
-      memcpy(&address.addr.ipv6, tuple.getAddress().to_v6().to_bytes().c_array(), sizeof(address.addr.ipv6));
+      memcpy(&address.addr.ipv6, tuple.getAddress().to_v6().to_bytes().data(), sizeof(address.addr.ipv6));
    }
    else
    {
@@ -354,7 +356,7 @@ StunMessage::setTupleFromStunAtrAddress(StunTuple& tuple, const StunAtrAddress& 
    {
       // Note:  addr.ipv6 is stored in network byte order
       asio::ip::address_v6::bytes_type bytes;
-      memcpy(bytes.c_array(), &address.addr.ipv6, bytes.size());
+      memcpy(bytes.data(), &address.addr.ipv6, bytes.size());
       asio::ip::address_v6 addr(bytes);
       tuple.setAddress(addr);
    }
@@ -454,6 +456,7 @@ StunMessage::stunParseAtrUInt64( char* body, unsigned int hdrLen,  UInt64& resul
    else
    {
       memcpy(&result, body, 8);
+      result = ntoh64(result);
       return true;
    }
 }
@@ -511,7 +514,7 @@ StunMessage::stunParseAtrIntegrity( char* body, unsigned int hdrLen,  StunAtrInt
 bool
 StunMessage::stunParseMessage( char* buf, unsigned int bufLen)
 {
-   DebugLog(<< "Received stun message: " << bufLen << " bytes");
+   StackLog(<< "Received stun message: " << bufLen << " bytes");
 	
    if (sizeof(StunMsgHdr) > bufLen)
    {
@@ -1186,7 +1189,7 @@ operator<<( EncodeStream& strm, const StunMessage::StunAtrAddress& addr)
    if(addr.family == StunMessage::IPv6Family)
    {
       asio::ip::address_v6::bytes_type bytes;
-      memcpy(bytes.c_array(), &addr.addr.ipv6, bytes.size());
+      memcpy(bytes.data(), &addr.addr.ipv6, bytes.size());
       asio::ip::address_v6 addrv6(bytes);
 
       strm << "[" << addrv6.to_string() << "]:" << addr.port;
@@ -1297,6 +1300,14 @@ StunMessage::encode32(char* buf, UInt32 data)
    return buf + sizeof(UInt32);
 }
 
+char*
+StunMessage::encode64(char* buf, const UInt64 data)
+{
+   UInt64 ndata = hton64(data);
+   memcpy(buf, reinterpret_cast<void*>(&ndata), sizeof(UInt64));
+   return buf + sizeof(UInt64);
+}
+
 char* 
 StunMessage::encode(char* buf, const char* data, unsigned int length)
 {
@@ -1331,8 +1342,8 @@ StunMessage::encodeAtrUInt64(char* ptr, UInt16 type, UInt64 value)
 {
    ptr = encode16(ptr, type);
    ptr = encode16(ptr, 8);
-   memcpy(ptr, reinterpret_cast<void*>(&value), sizeof(UInt64));
-   return ptr + sizeof(UInt64);
+   ptr = encode64(ptr, value);
+   return ptr;
 }
 
 char*
@@ -1369,7 +1380,7 @@ StunMessage::encodeAtrAddress(char* ptr, UInt16 type, const StunAtrAddress& atr)
 char* 
 StunMessage::encodeAtrError(char* ptr, const StunAtrError& atr)
 {
-   assert(atr.reason);
+   resip_assert(atr.reason);
    UInt16 padsize = (unsigned int)atr.reason->size() % 4 == 0 ? 0 : 4 - ((unsigned int)atr.reason->size() % 4);
 
    ptr = encode16(ptr, ErrorCode);
@@ -1398,7 +1409,7 @@ StunMessage::encodeAtrUnknown(char* ptr, const StunAtrUnknown& atr)
 char* 
 StunMessage::encodeAtrString(char* ptr, UInt16 type, const Data* atr, UInt16 maxBytes)
 {
-   assert(atr);
+   resip_assert(atr);
    UInt16 size = atr->size() > maxBytes ? maxBytes : (UInt16)atr->size();
    UInt16 padsize = size % 4 == 0 ? 0 : 4 - (size % 4);
 	
@@ -1438,7 +1449,7 @@ StunMessage::hasMagicCookie()
 unsigned int
 StunMessage::stunEncodeMessage(char* buf, unsigned int bufLen) 
 {
-   assert(bufLen >= sizeof(StunMsgHdr));
+   resip_assert(bufLen >= sizeof(StunMsgHdr));
    char* ptr = buf;
 
    mHeader.msgType = mClass | mMethod;
@@ -1670,6 +1681,7 @@ StunMessage::stunEncodeFramedMessage(char* buf, unsigned int bufLen)
 void
 StunMessage::computeHmac(char* hmac, const char* input, int length, const char* key, int sizeKey)
 {
+   // !slg! TODO - use newly added rutil/SHA1.hxx class  - will need to add new method to it to support this
    strncpy(hmac,"hmac-not-implemented",20);
 }
 #else
@@ -1683,7 +1695,7 @@ StunMessage::computeHmac(char* hmac, const char* input, int length, const char* 
         key, sizeKey, 
         reinterpret_cast<const unsigned char*>(input), length, 
         reinterpret_cast<unsigned char*>(hmac), &resultSize);
-   assert(resultSize == 20);
+   resip_assert(resultSize == 20);
 }
 #endif
 
@@ -1700,15 +1712,15 @@ StunMessage::createUsernameAndPassword()
    {
       mUsername = new Data;
    }
-   assert(mUsername);
+   resip_assert(mUsername);
 
    if(mRemoteTuple.getAddress().is_v6())
    {
-      *mUsername = Data(mRemoteTuple.getAddress().to_v6().to_bytes().c_array(), mRemoteTuple.getAddress().to_v6().to_bytes().size()).base64encode() + ":";
+      *mUsername = Data(mRemoteTuple.getAddress().to_v6().to_bytes().data(), mRemoteTuple.getAddress().to_v6().to_bytes().size()).base64encode() + ":";
    }
    else
    {
-      *mUsername = Data(mRemoteTuple.getAddress().to_v4().to_bytes().c_array(), mRemoteTuple.getAddress().to_v4().to_bytes().size()).base64encode() + ":";
+      *mUsername = Data(mRemoteTuple.getAddress().to_v4().to_bytes().data(), mRemoteTuple.getAddress().to_v4().to_bytes().size()).base64encode() + ":";
    }
    unsigned int port = mRemoteTuple.getPort();
    *mUsername += Data((char*)&port, sizeof(unsigned int)).base64encode() + ":"; 
@@ -1718,7 +1730,7 @@ StunMessage::createUsernameAndPassword()
    computeHmac(hmac, mUsername->data(), (int)mUsername->size(), USERNAME_KEY.data(), (int)USERNAME_KEY.size());
    *mUsername += Data(hmac, sizeof(hmac)).hex();
 	
-   assert( mUsername->size()%4 == 0 );
+   resip_assert( mUsername->size()%4 == 0 );
    	
    StackLog(<< "computed username=" << *mUsername);
 
@@ -1729,7 +1741,7 @@ StunMessage::createUsernameAndPassword()
    {
       mPassword = new Data;
    }
-   assert(mPassword);
+   resip_assert(mPassword);
    generateShortTermPasswordForUsername(*mPassword);
 
    StackLog(<< "computed password=" << *mPassword);
@@ -1739,7 +1751,7 @@ void
 StunMessage::generateShortTermPasswordForUsername(Data& password)
 {
    char hmac[20];
-   assert(mHasUsername && mUsername);
+   resip_assert(mHasUsername && mUsername);
    computeHmac(hmac, mUsername->data(), (int)mUsername->size(), PASSWORD_KEY.data(), (int)PASSWORD_KEY.size());
    password = Data(hmac, sizeof(hmac)).hex();
 }
@@ -1747,16 +1759,16 @@ StunMessage::generateShortTermPasswordForUsername(Data& password)
 void
 StunMessage::getTupleFromUsername(StunTuple& tuple)
 {
-   assert(mHasUsername);
-   assert(mUsername && mUsername->size() >= 92);
-   assert(mUsername->size() == 92 || mUsername->size() == 108);
+   resip_assert(mHasUsername);
+   resip_assert(mUsername && mUsername->size() >= 92);
+   resip_assert(mUsername->size() == 92 || mUsername->size() == 108);
 
    if(mUsername->size() > 92)  // if over a certain size, then contains IPv6 address
    {
       Data addressPart(Data::Share, mUsername->data(), 24); 
       addressPart = addressPart.base64decode();
       asio::ip::address_v6::bytes_type bytes;
-      memcpy(bytes.c_array(), addressPart.data(), bytes.size());
+      memcpy(bytes.data(), addressPart.data(), bytes.size());
       asio::ip::address_v6 addressv6(bytes);
       tuple.setAddress(addressv6);
 
@@ -1771,7 +1783,7 @@ StunMessage::getTupleFromUsername(StunTuple& tuple)
       Data addressPart(Data::Share, mUsername->data(), 8);  
       addressPart = addressPart.base64decode();
       asio::ip::address_v4::bytes_type bytes;
-      memcpy(bytes.c_array(), addressPart.data(), bytes.size());
+      memcpy(bytes.data(), addressPart.data(), bytes.size());
       asio::ip::address_v4 addressv4(bytes);
       tuple.setAddress(addressv4);
 
@@ -1786,11 +1798,26 @@ StunMessage::getTupleFromUsername(StunTuple& tuple)
 void
 StunMessage::calculateHmacKey(Data& hmacKey, const Data& longtermAuthenticationPassword)
 {
-   assert(mHasUsername);
+   resip_assert(mHasUsername);
 
    if(mHasRealm)  // Longterm authenicationmode
    {
       calculateHmacKey(hmacKey, *mUsername, *mRealm, longtermAuthenticationPassword);
+   }
+   else
+   {
+      generateShortTermPasswordForUsername(hmacKey);
+   }
+}
+
+void
+StunMessage::calculateHmacKeyForHa1(Data& hmacKey, const Data& ha1)
+{
+   resip_assert(mHasUsername);
+
+   if(mHasRealm)  // Longterm authenicationmode
+   {
+      hmacKey = ha1;
    }
    else
    {
@@ -1805,7 +1832,7 @@ StunMessage::calculateHmacKey(Data& hmacKey, const Data& username, const Data& r
    r << username << ":" << realm << ":" << longtermAuthenticationPassword;
    hmacKey = r.getBin();
   
-   DebugLog(<< "calculateHmacKey: '" << username << ":" << realm << ":" << longtermAuthenticationPassword << "' = '" << hmacKey.hex() << "'");
+   StackLog(<< "calculateHmacKey: '" << username << ":" << realm << ":" << longtermAuthenticationPassword << "' = '" << hmacKey.hex() << "'");
 }
 
 bool 

@@ -1,6 +1,6 @@
 # $Id$
 
-EXTRA_DIST = dayofweek.gperf
+EXTRA_DIST = DayOfWeekHash.gperf
 EXTRA_DIST += Doxyfile
 EXTRA_DIST += FAQ
 EXTRA_DIST += gperfNotes.txt
@@ -9,11 +9,11 @@ EXTRA_DIST += groups.doc
 EXTRA_DIST += HeaderHash.gperf
 EXTRA_DIST += mainpage.doc
 EXTRA_DIST += MethodHash.gperf
-EXTRA_DIST += month.gperf
+EXTRA_DIST += MonthHash.gperf
 EXTRA_DIST += ParameterHash.gperf
 EXTRA_DIST += parametersA.gperf
 EXTRA_DIST += Readme-Compliance.txt
-EXTRA_DIST += resiprocate_10_0.vcxproj resiprocate_10_0.vcxproj.filters
+EXTRA_DIST += *.vcxproj *.vcxproj.filters
 EXTRA_DIST += *.vcproj
 EXTRA_DIST += ssl/WinSecurity.cxx
 
@@ -30,16 +30,28 @@ AM_CXXFLAGS = -I $(top_srcdir)
 
 #AM_CXXFLAGS = -I../../contrib/ares -DUSE_ARES
 
+BUILT_SOURCES = \
+	gen/DayOfWeekHash.cxx \
+	gen/HeaderHash.cxx \
+	gen/MethodHash.cxx \
+	gen/MonthHash.cxx \
+	gen/ParameterHash.cxx
+
 lib_LTLIBRARIES = libresip.la
 
-libresip_la_LIBADD = @LIBSSL_LIBADD@
+libresip_la_LIBADD = ../../rutil/librutil.la
+libresip_la_LIBADD += @LIBSSL_LIBADD@
+libresip_la_LIBADD += @LIBSTL_LIBADD@
 libresip_la_LDFLAGS = @LIBTOOL_VERSION_RELEASE@ -export-dynamic
 
 libresip_la_SOURCES = \
 	Auth.cxx \
 	CSeqCategory.cxx \
 	CallId.cxx \
+	Cookie.cxx \
 	DateCategory.cxx \
+	gen/DayOfWeekHash.cxx \
+	DtmfPayloadContents.cxx \
 	ExpiresCategory.cxx \
 	GenericUri.cxx \
 	IntegerCategory.cxx \
@@ -52,6 +64,7 @@ libresip_la_SOURCES = \
 	StatusLine.cxx \
 	StringCategory.cxx \
 	Token.cxx \
+	TokenOrQuotedStringCategory.cxx \
 	Via.cxx \
 	WarningCategory.cxx \
 	\
@@ -80,9 +93,10 @@ libresip_la_SOURCES = \
 	QValue.cxx \
 	QValueParameter.cxx \
 	GenericContents.cxx \
+	GenericPidfContents.cxx \
 	HeaderFieldValue.cxx \
 	HeaderFieldValueList.cxx \
-	HeaderHash.cxx \
+	gen/HeaderHash.cxx \
 	HeaderTypes.cxx \
 	Headers.cxx \
 	Helper.cxx \
@@ -92,8 +106,9 @@ libresip_la_SOURCES = \
 	LazyParser.cxx \
 	Message.cxx \
 	MessageWaitingContents.cxx \
-	MethodHash.cxx \
+	gen/MethodHash.cxx \
 	MethodTypes.cxx \
+	gen/MonthHash.cxx \
 	MsgHeaderScanner.cxx \
 	MultipartAlternativeContents.cxx \
 	MultipartMixedContents.cxx \
@@ -102,7 +117,7 @@ libresip_la_SOURCES = \
 	NonceHelper.cxx \
 	OctetContents.cxx \
 	Parameter.cxx \
-	ParameterHash.cxx \
+	gen/ParameterHash.cxx \
 	ParameterTypes.cxx \
 	ParserCategory.cxx \
 	ParserContainerBase.cxx \
@@ -131,6 +146,7 @@ libresip_la_SOURCES = \
 	Symbols.cxx \
 	TcpBaseTransport.cxx \
 	TcpConnection.cxx \
+	TcpConnectState.cxx \
 	TcpTransport.cxx \
 	TimeAccumulate.cxx \
 	TimerMessage.cxx \
@@ -156,8 +172,12 @@ libresip_la_SOURCES = \
 	KeepAliveMessage.cxx \
 	StatelessHandler.cxx \
 	InvalidContents.cxx \
+	WsBaseTransport.cxx \
 	WsFrameExtractor.cxx \
 	WsTransport.cxx \
+	WsConnection.cxx \
+	WsConnectionBase.cxx \
+	WsCookieContext.cxx \
 	WsDecorator.cxx
 
 if USE_SSL
@@ -167,26 +187,37 @@ libresip_la_SOURCES += \
 	ssl/TlsBaseTransport.cxx \
 	ssl/TlsConnection.cxx \
 	ssl/TlsTransport.cxx \
-	ssl/WssTransport.cxx
+	ssl/WssTransport.cxx \
+   ssl/WssConnection.cxx
 endif
 
 SUFFIXES = .gperf .cxx
-GPERFOPTS = -C -D -E -L C++ -t -k '*' --compare-strncmp
+GPERFOPTS = -C -D -E -L C++ -t --key-positions='*' --compare-strncmp
 #GPERFVER="GNU gperf 2.7.2"
 
 # rule for case sensitive sorts of hash
-MethodHash.cxx: MethodHash.gperf
-	gperf -v > /dev/null 2>&1 && gperf $(GPERFOPTS) -Z `echo MethodHash | sed -e 's/.*\///'` $< > $@ || echo "gperf not installed, touching $@" && touch $@
+gen/MethodHash.cxx: MethodHash.gperf
+	mkdir -p $(abs_srcdir)/gen
+	gperf $(GPERFOPTS) -Z MethodHash $< > $@
+
+# note: the Date header field is case sensitive (RFC 3261 s20.17)
+gen/DayOfWeekHash.cxx: DayOfWeekHash.gperf
+	mkdir -p $(abs_srcdir)/gen
+	gperf $(GPERFOPTS) -Z DayOfWeekHash $< > $@
+gen/MonthHash.cxx: MonthHash.gperf
+	mkdir -p $(abs_srcdir)/gen
+	gperf $(GPERFOPTS) -Z MonthHash $< > $@
 
 # rule for insensitive clods
 #${SRC}: ${@:%.cxx=%.gperf} -- more portable?
-%.cxx: %.gperf
-	gperf -v > /dev/null 2>&1 && gperf $(GPERFOPTS) --ignore-case -Z $* $< > $@ || \
-	echo "gperf not installed, touching $@" && touch $@
+gen/%.cxx: %.gperf
+	mkdir -p $(abs_srcdir)/gen
+	gperf $(GPERFOPTS) --ignore-case -Z $* $< > $@
 
 
 resipincludedir = $(includedir)/resip/stack
 nobase_resipinclude_HEADERS = AbandonServerTransaction.hxx \
+	AddTransport.hxx \
 	Aor.hxx \
 	ApiCheck.hxx \
 	ApiCheckList.hxx \
@@ -196,6 +227,7 @@ nobase_resipinclude_HEADERS = AbandonServerTransaction.hxx \
 	BasicNonceHelper.hxx \
 	BranchParameter.hxx \
 	CallId.hxx \
+	Cookie.hxx \
 	CancelableTimerQueue.hxx \
 	CancelClientInviteTransaction.hxx \
 	Compression.hxx \
@@ -215,6 +247,7 @@ nobase_resipinclude_HEADERS = AbandonServerTransaction.hxx \
 	DnsResult.hxx \
 	DnsResultMessage.hxx \
 	DtlsMessage.hxx \
+	DtmfPayloadContents.hxx \
 	Embedded.hxx \
 	EnableFlowTimer.hxx \
 	EventStackThread.hxx \
@@ -226,6 +259,7 @@ nobase_resipinclude_HEADERS = AbandonServerTransaction.hxx \
 	ExternalBodyContents.hxx \
 	FloatParameter.hxx \
 	GenericContents.hxx \
+	GenericPidfContents.hxx \
 	GenericUri.hxx \
 	HeaderFieldValue.hxx \
 	HeaderFieldValueList.hxx \
@@ -276,6 +310,7 @@ nobase_resipinclude_HEADERS = AbandonServerTransaction.hxx \
 	QValue.hxx \
 	QValueParameter.hxx \
 	RAckCategory.hxx \
+	RemoveTransport.hxx \
 	RequestLine.hxx \
 	Rlmi.hxx \
 	RportParameter.hxx \
@@ -296,6 +331,7 @@ nobase_resipinclude_HEADERS = AbandonServerTransaction.hxx \
 	ssl/TlsTransport.hxx \
 	ssl/WinSecurity.hxx \
 	ssl/WssTransport.hxx \
+	ssl/WssConnection.hxx \
 	StackThread.hxx \
 	StartLine.hxx \
 	StatelessHandler.hxx \
@@ -307,12 +343,14 @@ nobase_resipinclude_HEADERS = AbandonServerTransaction.hxx \
 	Symbols.hxx \
 	TcpBaseTransport.hxx \
 	TcpConnection.hxx \
+	TcpConnectState.hxx \
 	TcpTransport.hxx \
 	TerminateFlow.hxx \
 	TimeAccumulate.hxx \
 	TimerMessage.hxx \
 	TimerQueue.hxx \
 	Token.hxx \
+	TokenOrQuotedStringCategory.hxx \
 	TransactionController.hxx \
 	TransactionControllerThread.hxx \
 	TransactionMap.hxx \
@@ -340,9 +378,15 @@ nobase_resipinclude_HEADERS = AbandonServerTransaction.hxx \
 	ValueFifo.hxx \
 	Via.hxx \
 	WarningCategory.hxx \
-        WsDecorator.hxx \
+	WsBaseTransport.hxx \
+	WsDecorator.hxx \
 	WsFrameExtractor.hxx \
-        WsTransport.hxx \
+	WsTransport.hxx \
+	WsConnection.hxx \
+	WsConnectionBase.hxx \
+	WsConnectionValidator.hxx \
+	WsCookieContext.hxx \
+	WsCookieContextFactory.hxx \
 	X509Contents.hxx \
 	ZeroOutStatistics.hxx
 

@@ -37,7 +37,9 @@
 #include "rutil/FdPoll.hxx"
 #include "rutil/WinLeakCheck.hxx"
 #include "rutil/dns/DnsStub.hxx"
-
+#ifdef USE_NETNS
+#   include "rutil/NetNs.hxx"
+#endif
 #ifdef USE_SIGCOMP
 #include <osc/Stack.h>
 #include <osc/SigcompMessage.h>
@@ -59,6 +61,7 @@
 #endif
 
 #include <sys/types.h>
+#include "rutil/Errdes.hxx"
 
 using namespace resip;
 
@@ -68,8 +71,6 @@ TransportSelector::TransportSelector(Fifo<TransactionMessage>& fifo, Security* s
    mDns(dnsStub),
    mStateMacFifo(fifo),
    mSecurity(security),
-   mSocket( INVALID_SOCKET ),
-   mSocket6( INVALID_SOCKET ),
    mCompression(compression),
    mSigcompStack (0),
    mPollGrp(0),
@@ -110,19 +111,33 @@ TransportSelector::~TransportSelector()
    mSharedProcessTransports.clear();
    mHasOwnProcessTransports.clear();
    mTypeToTransportMap.clear();
-   while(!mTransports.empty())
+   for(TransportKeyMap::iterator it = mTransports.begin(); it != mTransports.end(); it++)
    {
-      delete mTransports.back();
-      mTransports.pop_back();
+      delete it->second;
    }
 #ifdef USE_SIGCOMP
    delete mSigcompStack;
 #endif
 
-    if ( mSocket != INVALID_SOCKET )
-        closeSocket( mSocket );
-    if ( mSocket6 != INVALID_SOCKET )
-        closeSocket( mSocket6 );
+   for(HashMap<Data, Socket>::iterator socketIterator = mSockets.begin();
+       socketIterator != mSockets.end(); socketIterator++)
+   {
+      if (socketIterator->second != INVALID_SOCKET)
+      {
+         closeSocket(socketIterator->second);
+         DebugLog(<< "Closing TransportSelector::mSocket[" << socketIterator->first << "]");
+      }
+   }
+
+   for(HashMap<Data, Socket>::iterator socketIterator = mSocket6s.begin();
+       socketIterator != mSocket6s.end(); socketIterator++)
+   {
+      if (socketIterator->second != INVALID_SOCKET)
+      {
+         closeSocket(socketIterator->second);
+         DebugLog(<< "Closing TransportSelector::mSocket6[" << socketIterator->first << "]");
+      }
+   }
 
    setPollGrp(0);
 }
@@ -130,111 +145,80 @@ TransportSelector::~TransportSelector()
 void
 TransportSelector::shutdown()
 {
-    //!dcm! repeat shutdown template pattern in all loop over all transport functions, refactor to functor?
-    for (ExactTupleMap::iterator i=mExactTransports.begin(); i!=mExactTransports.end(); ++i)
+   for(TransportKeyMap::iterator it = mTransports.begin(); it != mTransports.end(); it++)
    {
-      i->second->shutdown();
-   }
-   for (AnyInterfaceTupleMap::iterator i=mAnyInterfaceTransports.begin(); i!=mAnyInterfaceTransports.end(); ++i)
-   {
-      i->second->shutdown();
-   }
-   for (TlsTransportMap::iterator i=mTlsTransports.begin(); i!=mTlsTransports.end(); ++i)
-   {
-      i->second->shutdown();
+       it->second->shutdown();
    }
 }
 
 bool
 TransportSelector::isFinished() const
 {
-   for (ExactTupleMap::const_iterator i=mExactTransports.begin(); i!=mExactTransports.end(); ++i)
+   for(TransportKeyMap::const_iterator it = mTransports.begin(); it != mTransports.end(); it++)
    {
-      if (!i->second->isFinished()) return false;
-   }
-   for (AnyInterfaceTupleMap::const_iterator i=mAnyInterfaceTransports.begin(); i!=mAnyInterfaceTransports.end(); ++i)
-   {
-      if (!i->second->isFinished()) return false;
-   }
-   for (TlsTransportMap::const_iterator i=mTlsTransports.begin(); i!=mTlsTransports.end(); ++i)
-   {
-      if (!i->second->isFinished()) return false;
+      if (!it->second->isFinished())
+      {
+          return false;
+      }
    }
    return true;
 }
 
 void
-TransportSelector::addTransport(std::auto_ptr<Transport> autoTransport,
-                                 bool immediate)
-{
-   if(immediate)
-   {
-      addTransportInternal(autoTransport);
-   }
-   else
-   {
-      mTransportsToAdd.add(autoTransport.release());
-   }
-}
-
-void
-TransportSelector::addTransportInternal(std::auto_ptr<Transport> autoTransport)
+TransportSelector::addTransport(std::auto_ptr<Transport> autoTransport, bool isStackRunning)
 {
    Transport* transport = autoTransport.release();
-   mDns.addTransportType(transport->transport(), transport->ipVersion());
 
    // !bwc! This is a multimap from TransportType/IpVersion to Transport*.
    // Make _extra_ sure that no garbage goes in here.
    if(transport->transport()==TCP)
    {
-      assert(dynamic_cast<TcpTransport*>(transport));
+      resip_assert(dynamic_cast<TcpTransport*>(transport));
    }
 #ifdef USE_SSL
    else if(transport->transport()==TLS)
    {
-      assert(dynamic_cast<TlsTransport*>(transport));
+      resip_assert(dynamic_cast<TlsTransport*>(transport));
    }
 #endif
    else if(transport->transport()==UDP)
    {
-      assert(dynamic_cast<UdpTransport*>(transport));
+      resip_assert(dynamic_cast<UdpTransport*>(transport));
    }
 #ifdef USE_DTLS
 #ifdef USE_SSL
    else if(transport->transport()==DTLS)
    {
-      assert(dynamic_cast<DtlsTransport*>(transport));
+      resip_assert(dynamic_cast<DtlsTransport*>(transport));
    }
 #endif
 #endif
    else if(transport->transport()==WS)
    {
-      assert(dynamic_cast<WsTransport*>(transport));
+      resip_assert(dynamic_cast<WsTransport*>(transport));
    }
 #ifdef USE_SSL
    else if(transport->transport()==WSS)
    {
-      assert(dynamic_cast<WssTransport*>(transport));
+      resip_assert(dynamic_cast<WssTransport*>(transport));
    }
 #endif
    else
    {
-      assert(0);
+      resip_assert(0);
    }
 
    Tuple tuple(transport->interfaceName(), transport->port(),
-               transport->ipVersion(), transport->transport());
-   mTypeToTransportMap.insert(TypeToTransportMap::value_type(tuple,transport));
+               transport->ipVersion(), transport->transport(),
+               Data::Empty, // Domain
+               transport->netNs());
+   tuple.mTransportKey = transport->getKey();
 
-   switch (transport->transport())
+   if(!isSecure(transport->transport()))
    {
-      case UDP:
-      case TCP:
-      case WS:
+      if(mExactTransports.find(tuple) == mExactTransports.end() &&
+         mAnyInterfaceTransports.find(tuple) == mAnyInterfaceTransports.end())
       {
-         assert(mExactTransports.find(tuple) == mExactTransports.end() &&
-                mAnyInterfaceTransports.find(tuple) == mAnyInterfaceTransports.end());
-
          DebugLog (<< "Adding transport: " << tuple);
 
          // Store the transport in the ANY interface maps if the tuple specifies ANY
@@ -253,18 +237,27 @@ TransportSelector::addTransportInternal(std::auto_ptr<Transport> autoTransport)
             mAnyPortTransports[tuple] = transport;
          }
       }
-      break;
-      case TLS:
-      case DTLS:
-      case WSS:
+      else
       {
-         TlsTransportKey key(transport->tlsDomain(),transport->transport(),transport->ipVersion());
-         mTlsTransports[key]=transport;
+         WarningLog (<< "Can't add transport, overlapping properties with existing transport: " << tuple);
+         resip_assert(false); // should never get here - checked in SipStack first
+         return;
       }
-      break;
-      default:
-         assert(0);
-         break;
+   }
+   else
+   {
+      tuple.setTargetDomain(transport->tlsDomain());
+      TlsTransportKey key(tuple);
+      if(mTlsTransports.find(key) == mTlsTransports.end())
+      {
+         mTlsTransports[key] = transport;
+      }
+      else
+      {
+         WarningLog (<< "Can't add transport, overlapping properties with existing transport: " << tuple);
+         resip_assert(false); // should never get here - checked in SipStack first
+         return;
+      }
    }
 
    if (transport->shareStackProcessAndSelect())
@@ -273,7 +266,20 @@ TransportSelector::addTransportInternal(std::auto_ptr<Transport> autoTransport)
       {
          transport->setPollGrp(mPollGrp);
       }
-      mSharedProcessTransports.push_back(transport);
+      if(isStackRunning)
+      {
+         // When stack is running we need to add to mSharedProcessTransports from 
+         // within TransportSelectorThread in order to be thread safe
+         mTransportsToAddRemove.add(transport); 
+      }
+      else
+      {
+         // Stack isn't running yet - just add to mSharedProcess directly - this
+         // ensures the mSharedProcessTransports list is propulated when the stack
+         // starts to run.  When in multi-threaded stack mode the TransportSelectorThread 
+         // will assume ownership (FdPollGrp control) of all the transports using this list.
+         mSharedProcessTransports.push_back(transport);
+      }
    }
    else
    {
@@ -281,8 +287,75 @@ TransportSelector::addTransportInternal(std::auto_ptr<Transport> autoTransport)
       mHasOwnProcessTransports.back()->startOwnProcessing();
    }
 
-   mTransports.push_back(transport);
-   transport->setKey((unsigned int)mTransports.size());
+   mTypeToTransportMap.insert(TypeToTransportMap::value_type(tuple,transport));
+   mDns.addTransportType(transport->transport(), transport->ipVersion());
+   mTransports[transport->getKey()] = transport;
+
+   InfoLog(<< "TransportSelector::addTransport:  added transport for tuple=" << tuple << ", key=" << transport->getKey());
+}
+
+void
+TransportSelector::removeTransport(unsigned int transportKey)
+{
+   Transport* transportToRemove = 0;
+
+   // Find transport in global map and remove it
+   TransportKeyMap::iterator it = mTransports.find(transportKey);
+   if(it != mTransports.end())
+   {
+       transportToRemove = it->second;
+       mTransports.erase(it);
+   }
+
+   // If we found the transport - continue removal from other maps
+   if(transportToRemove)
+   {
+      // notify transport to shutdown
+      transportToRemove->shutdown();
+
+      if(!isSecure(transportToRemove->transport()))
+      {
+         // Ensure transport is removed from all containers
+         mAnyInterfaceTransports.erase(transportToRemove->getTuple());
+         mAnyPortAnyInterfaceTransports.erase(transportToRemove->getTuple());
+         mExactTransports.erase(transportToRemove->getTuple());
+         mAnyPortTransports.erase(transportToRemove->getTuple());
+      }
+      else
+      {
+         Tuple tlsRemoveTuple = transportToRemove->getTuple();
+         tlsRemoveTuple.setTargetDomain(transportToRemove->tlsDomain());
+         TlsTransportKey tlsKey(tlsRemoveTuple);
+         mTlsTransports.erase(tlsKey);
+      }
+
+      mTypeToTransportMap.erase(transportToRemove->getTuple());
+
+      // Remove transport types from Dns list of supported protocols
+      mDns.removeTransportType(transportToRemove->transport(), transportToRemove->ipVersion());
+
+      if (transportToRemove->shareStackProcessAndSelect())
+      {
+         // Note:  We called shutdown above, therefor the TransportSelectorThread can tell this 
+         //        is a remove transpot request vs an addTransport request, by calling isShuttingDown().
+         mTransportsToAddRemove.add(transportToRemove); // Need to add to mSharedProcessTransports from within TransportSelectorThread
+         // Note:  Transport will be deleted from mTransportsToAddRemove handler (see checkTransportAddRemoveQueue)
+      }
+      else
+      {
+         for(TransportList::iterator it = mHasOwnProcessTransports.begin(); it != mHasOwnProcessTransports.end(); it++)
+         {
+            if((*it)->getKey() == transportKey)
+            {
+               mHasOwnProcessTransports.erase(it);
+               break;
+            }
+         }
+
+         // Delete transport
+         delete transportToRemove;
+      }
+   }
 }
 
 void
@@ -302,8 +375,7 @@ TransportSelector::setPollGrp(FdPollGrp *grp)
       mInterruptorHandle = mPollGrp->addPollItem(mSelectInterruptor->getReadSocket(), FPEM_Read, mSelectInterruptor.get());
    }
 
-   for(TransportList::iterator t=mSharedProcessTransports.begin(); 
-         t!=mSharedProcessTransports.end(); ++t)
+   for(TransportList::iterator t=mSharedProcessTransports.begin(); t!=mSharedProcessTransports.end(); ++t)
    {
       (*t)->setPollGrp(mPollGrp);
    }
@@ -325,8 +397,7 @@ TransportSelector::createSelectInterruptor()
 void
 TransportSelector::buildFdSet(FdSet& fdset)
 {
-   for(TransportList::iterator it = mSharedProcessTransports.begin();
-       it != mSharedProcessTransports.end(); it++)
+   for(TransportList::iterator it = mSharedProcessTransports.begin(); it != mSharedProcessTransports.end(); it++)
    {
       (*it)->buildFdSet(fdset);
    }
@@ -339,10 +410,9 @@ TransportSelector::buildFdSet(FdSet& fdset)
 void
 TransportSelector::process(FdSet& fdset)
 {
-   checkTransportAddQueue();
+   checkTransportAddRemoveQueue();
 
-   for(TransportList::iterator it = mSharedProcessTransports.begin(); 
-       it != mSharedProcessTransports.end(); it++)
+   for(TransportList::iterator it = mSharedProcessTransports.begin(); it != mSharedProcessTransports.end(); it++)
    {
       try
       {
@@ -363,12 +433,10 @@ TransportSelector::process(FdSet& fdset)
 void 
 TransportSelector::process()
 {
-   // This function will only be sufficient if these Transports are hooked into
-   // a FdPollGrp.
-   checkTransportAddQueue();
+   // This function will only be sufficient if these Transports are hooked into a FdPollGrp.
+   checkTransportAddRemoveQueue();
 
-   for(TransportList::iterator it = mSharedProcessTransports.begin(); 
-       it != mSharedProcessTransports.end(); it++)
+   for(TransportList::iterator it = mSharedProcessTransports.begin(); it != mSharedProcessTransports.end(); it++)
    {
       try
       {
@@ -382,21 +450,43 @@ TransportSelector::process()
 }
 
 void
-TransportSelector::checkTransportAddQueue()
+TransportSelector::checkTransportAddRemoveQueue()
 {
-   std::auto_ptr<Transport> t(mTransportsToAdd.getNext(-1));
-   while(t.get())
+   // This method ensures we add/remove from/to the mSharedProcessTransports 
+   // list from the TransportSelectorThread
+   
+   Transport* t(mTransportsToAddRemove.getNext(-1));
+   while(t)
    {
-      addTransportInternal(t);
-      t.reset(mTransportsToAdd.getNext(0));
+      if(!t->isShuttingDown())
+      {
+         // If not shutting down then this is an addTransport request
+         mSharedProcessTransports.push_back(t);
+      }
+      else
+      {
+         // If shutting down then this is a removeTransport request
+         for(TransportList::iterator it = mSharedProcessTransports.begin(); it != mSharedProcessTransports.end(); it++)
+         {
+            if((*it)->getKey() == t->getKey())
+            {
+               mSharedProcessTransports.erase(it);
+               break;
+            }
+         }
+
+         // Now delete the transport
+         delete t;
+      }
+
+      t = mTransportsToAddRemove.getNext(-1);
    }
 }
 
 void 
 TransportSelector::poke()
 {
-   for(TransportList::iterator it = mHasOwnProcessTransports.begin(); 
-       it != mHasOwnProcessTransports.end(); it++)
+   for(TransportList::iterator it = mHasOwnProcessTransports.begin(); it != mHasOwnProcessTransports.end(); it++)
    {
       try
       {
@@ -408,7 +498,7 @@ TransportSelector::poke()
       }
    }
 
-   if(mSelectInterruptor.get() && hasDataToSend())
+   if(mSelectInterruptor.get() /* && hasDataToSend() */)  // removed hasDataToSend call since it is not thread safe
    {
       mSelectInterruptor->handleProcessNotification();
    }
@@ -417,8 +507,7 @@ TransportSelector::poke()
 bool
 TransportSelector::hasDataToSend() const
 {
-   for(TransportList::const_iterator it = mSharedProcessTransports.begin();
-       it != mSharedProcessTransports.end(); it++)
+   for(TransportList::const_iterator it = mSharedProcessTransports.begin(); it != mSharedProcessTransports.end(); it++)
    {
       if ((*it)->hasDataToSend())
       {
@@ -472,14 +561,15 @@ TransportSelector::dnsResolve(DnsResult* result,
    else if (msg->isResponse())
    {
       ErrLog(<<"unimplemented response dns");
-      assert(0);
+      resip_assert(0);
    }
    else
    {
-      assert(0);
+      resip_assert(0);
    }
 }
 
+// FIXME: maybe this should move to rutil/TransportType?
 bool isDgramTransport (TransportType type)
 {
    static const bool unknown_transport = false;
@@ -493,10 +583,12 @@ bool isDgramTransport (TransportType type)
 
       case TCP:
       case TLS:
+      case WS:
+      case WSS:
          return   false;
 
       default:
-         assert(unknown_transport);
+         resip_assert(unknown_transport);
          return unknown_transport;  // !kh! just to make it compile wo/warning.
    }
 }
@@ -506,7 +598,7 @@ TransportSelector::getFirstInterface(bool is_v4, TransportType type)
 {
 // !kh! both getaddrinfo() and IPv6 are not supported by cygwin, yet.
 #ifdef __CYGWIN__
-   assert(0);
+   resip_assert(0);
    return Tuple();
 #else
    // !kh!
@@ -516,7 +608,7 @@ TransportSelector::getFirstInterface(bool is_v4, TransportType type)
    {
       int e = getErrno();
       Transport::error( e );
-      InfoLog(<< "Can't query local hostname : [" << e << "] " << strerror(e) );
+      InfoLog(<< "Can't query local hostname : [" << e << "] " << errortostringOS(e) );
       throw Transport::Exception("Can't query local hostname", __FILE__, __LINE__);
    }
    InfoLog(<< "Local hostname is [" << hostname << "]");
@@ -564,17 +656,15 @@ TransportSelector::getFirstInterface(bool is_v4, TransportType type)
 
 
 /**
-   Check the msg's top Via header for a source host&port that indicates
-   a particular Transport.
-   Do NOT do this for a response, as it would allow malicious downstream
-   to insert bogus host in via header that we would then use.
+   Check the msg's top Via header for a source host&port that indicates a particular Transport.
+   Do NOT do this for a response, as it would allow malicious downstream to insert bogus host 
+   in via header that we would then use.
 **/
 Transport*
-TransportSelector::findTransportByVia(SipMessage* msg, const Tuple& target,
-  Tuple& source) const
+TransportSelector::findTransportByVia(SipMessage* msg, const Tuple& target, Tuple& source) const
 {
-   assert(msg->exists(h_Vias));
-   assert(!msg->const_header(h_Vias).empty());
+   resip_assert(msg->exists(h_Vias));
+   resip_assert(!msg->const_header(h_Vias).empty());
    const Via& via = msg->const_header(h_Vias).front();
 
    if (via.sentHost().empty() && via.transport().empty())
@@ -584,14 +674,16 @@ TransportSelector::findTransportByVia(SipMessage* msg, const Tuple& target,
 
    // XXX: Is there better way to do below (without the copy)?
    source = Tuple(via.sentHost(), via.sentPort(), target.ipVersion(), 
-      via.transport().empty() ? target.getType() : toTransportType(via.transport()));  // Transport type is pre-populated in via, lock to it
+      via.transport().empty() ? target.getType() : toTransportType(via.transport()), // Transport type is pre-populated in via, lock to it
+      Data::Empty, target.getNetNs());
+   DebugLog(<< "TransportSelector::findTransportByVia: source: " << source);
 
    if ( target.mFlowKey!=0 && (source.getPort()==0 || source.isAnyInterface()) )
    {
       WarningLog(<< "Sending request with incomplete Via header and FlowKey."
         <<" This code no smart enough to pick the correct Transport."
         <<" Via=" << via);
-      assert(0);
+      resip_assert(0);
    }
    if ( source.isAnyInterface() )
    {
@@ -619,12 +711,12 @@ TransportSelector::findTransportByVia(SipMessage* msg, const Tuple& target,
 Tuple
 TransportSelector::determineSourceInterface(SipMessage* msg, const Tuple& target) const
 {
-   assert(msg->exists(h_Vias));
-   assert(!msg->header(h_Vias).empty());
+   resip_assert(msg->exists(h_Vias));
+   resip_assert(!msg->header(h_Vias).empty());
    const Via& via = msg->header(h_Vias).front();
 
    // this case should be handled already for UDP and TCP targets
-   assert( (!(msg->isRequest() && !via.sentHost().empty())) || (target.getType() == TLS || target.getType() == DTLS) );
+   resip_assert((!(msg->isRequest() && !via.sentHost().empty())) || isSecure(target.getType()));
    if (1)
    {
       Tuple source(target);
@@ -650,29 +742,45 @@ TransportSelector::determineSourceInterface(SipMessage* msg, const Tuple& target
       // this process will determine which interface the kernel would use to
       // send a packet to the target by making a connect call on a udp socket.
       Socket tmp = INVALID_SOCKET;
+      Data netNs = target.getNetNs();
+      // One IPV4 and IPV6 socket per namespace.  Even if we do not support netns,
+      // we still have the default namespace of "" (empty string).
       if (target.isV4())
       {
-         if (mSocket == INVALID_SOCKET)
+         // If socket does not exist for namespace, create one
+         if (mSockets.find(netNs) == mSockets.end() || mSockets[netNs] == INVALID_SOCKET)
          {
-            mSocket = InternalTransport::socket(UDP, V4); // may throw
+#ifdef USE_NETNS
+            NetNs::setNs(netNs);
+#endif
+            mSockets[netNs] = InternalTransport::socket(UDP, V4); // may throw
          }
-         tmp = mSocket;
+         tmp = mSockets[netNs];
       }
       else
       {
-         if (mSocket6 == INVALID_SOCKET)
+         // If socket does not exist for namespace, create one
+         if (mSocket6s.find(netNs) == mSocket6s.end() || mSocket6s[netNs] == INVALID_SOCKET)
          {
-            mSocket6 = InternalTransport::socket(UDP, V6); // may throw
+#ifdef USE_NETNS
+            NetNs::setNs(netNs);
+#endif
+            mSocket6s[netNs] = InternalTransport::socket(UDP, V6); // may throw
          }
-         tmp = mSocket6;
+         tmp = mSocket6s[netNs];
       }
+
+#ifdef USE_NETNS
+      // Not sure if connect has to be done in netns context or just the socket create
+      NetNs::setNs(netNs);
+#endif
 
       int ret = connect(tmp,&target.getSockaddr(), target.length());
       if (ret < 0)
       {
          int e = getErrno();
          Transport::error( e );
-         InfoLog(<< "Unable to route to " << target << " : [" << e << "] " << strerror(e) );
+         InfoLog(<< "Unable to route to " << target << " : [" << e << "] " << errortostringOS(e) );
          throw Transport::Exception("Can't find source address for Via", __FILE__,__LINE__);
       }
 
@@ -682,7 +790,7 @@ TransportSelector::determineSourceInterface(SipMessage* msg, const Tuple& target
       {
          int e = getErrno();
          Transport::error(e);
-         InfoLog(<< "Can't determine name of socket " << target << " : " << strerror(e) );
+         InfoLog(<< "Can't determine name of socket " << target << " : " << errortostringOS(e) );
          throw Transport::Exception("Can't find source address for Via", __FILE__,__LINE__);
       }
 
@@ -712,21 +820,21 @@ TransportSelector::determineSourceInterface(SipMessage* msg, const Tuple& target
       // fails. I'm not sure the stack can recover from this error condition.
       if (target.isV4())
       {
-         ret = connect(mSocket,
+         ret = connect(mSockets[netNs],
                        (struct sockaddr*)&mUnspecified.v4Address,
                        sizeof(mUnspecified.v4Address));
       }
 #ifdef USE_IPV6
       else
       {
-         ret = connect(mSocket6,
+         ret = connect(mSocket6s[netNs],
                        (struct sockaddr*)&mUnspecified6.v6Address,
                        sizeof(mUnspecified6.v6Address));
       }
 #else
       else
       {
-         assert(0);
+         resip_assert(0);
       }
 #endif
 
@@ -736,7 +844,7 @@ TransportSelector::determineSourceInterface(SipMessage* msg, const Tuple& target
          //.dcm. OS X 10.5 workaround, we could #ifdef for specific OS X version.
          if  (!(e ==EAFNOSUPPORT || e == EADDRNOTAVAIL))
          {
-            ErrLog(<< "Can't disconnect socket :  " << strerror(e) );
+            ErrLog(<< "Can't disconnect socket :  " << errortostringOS(e) );
             Transport::error(e);
             throw Transport::Exception("Can't disconnect socket", __FILE__,__LINE__);
          }
@@ -769,10 +877,10 @@ TransportSelector::determineSourceInterface(SipMessage* msg, const Tuple& target
 
 // !jf! there may be an extra copy of a tuple here. can probably get rid of it
 // but there are some const issues.
-bool
+TransportSelector::TransmitState
 TransportSelector::transmit(SipMessage* msg, Tuple& target, SendData* sendData)
 {
-   assert(msg);
+   resip_assert(msg);
 
    if(msg->mIsDecorated)
    {
@@ -802,7 +910,7 @@ TransportSelector::transmit(SipMessage* msg, Tuple& target, SendData* sendData)
          Alternatively, we might not have the transport to start with. However,
          given a connection id, we will be able to find the Connection we
          should use, we can get the Transport we want. If we have no connection
-         id, but we know we are using TLS or DTLS and have a tls hostname, we
+         id, but we know we are using TLS, DTLS or WSS and have a tls hostname, we
          can use the hostname to find the appropriate transport. If all else
          fails, we must resort to the connected UDP trick to fill out source,
          which in turn is used to look up a matching transport.
@@ -825,7 +933,12 @@ TransportSelector::transmit(SipMessage* msg, Tuple& target, SendData* sendData)
             if ((transport = findTransportByDest(target)) != NULL)
             {
                source = transport->getTuple();
+               DebugLog(<< "Found transport: " << source);
             }
+         }
+         else
+         {
+            DebugLog(<< "Found transport: " << source);
          }
          
          if(!transport && target.mFlowKey && target.onlyUseExistingConnection)
@@ -836,7 +949,7 @@ TransportSelector::transmit(SipMessage* msg, Tuple& target, SendData* sendData)
          }
          else if (transport)// .bwc. Here we use transport to find source.
          {
-            assert( source.getType()!=0 );
+            resip_assert( source.getType()!=0 );
 
             // .bwc. If the transport has an ambiguous interface, we need to
             //look a little closer.
@@ -846,7 +959,7 @@ TransportSelector::transmit(SipMessage* msg, Tuple& target, SendData* sendData)
 
                // .bwc. determineSourceInterface() can give us a port, if the TU
                // put one in the topmost Via.
-               assert(source.ipVersion()==temp.ipVersion() &&
+               resip_assert(source.ipVersion()==temp.ipVersion() &&
                         source.getType()==temp.getType());
                source=temp;
 
@@ -864,6 +977,7 @@ TransportSelector::transmit(SipMessage* msg, Tuple& target, SendData* sendData)
          {
             source = determineSourceInterface(msg, target);
             transport = findTransportBySource(source, msg);
+            DebugLog(<< "Found transport: " << source);
 
             // .bwc. determineSourceInterface might give us a port
             if(transport && source.getPort()==0)
@@ -872,12 +986,12 @@ TransportSelector::transmit(SipMessage* msg, Tuple& target, SendData* sendData)
             }
          }
 
-         target.transportKey=transport ? transport->getKey() : 0;
+         target.mTransportKey = transport ? transport->getKey() : 0;
 
          // .bwc. Topmost Via is only filled out in the request case. Also, if
          // we don't have a transport at this point, we're going to fail,
          // so don't bother doing the work.
-         if(target.transportKey)
+         if(target.mTransportKey)
          {
             Via& topVia(msg->header(h_Vias).front());
             topVia.remove(p_maddr); // !jf! why do this?
@@ -944,7 +1058,6 @@ TransportSelector::transmit(SipMessage* msg, Tuple& target, SendData* sendData)
                topVia.param(p_branch).setSigcompCompartment(remoteSigcompId);
             }
          }
-
       }
       else if (msg->isResponse())
       {
@@ -953,56 +1066,55 @@ TransportSelector::transmit(SipMessage* msg, Tuple& target, SendData* sendData)
          // and this has been copied by TransactionState::sendToWire into transport
          transport=findTransportByDest(target);
 
-         // !bwc! May eventually remove this once we allow transports to be 
-         // removed while running.
-         assert(transport);
-         
-         source = transport->getTuple();
-
-         // .bwc. If the transport has an ambiguous interface, we need to
-         //look a little closer.
-         if(source.isAnyInterface())
+         // Transport used to receive the request, may have been removed.
+         if(transport)
          {
-            Tuple temp = source;
-            source = determineSourceInterface(msg,target);
-            assert(source.ipVersion()==temp.ipVersion() &&
-                     source.getType()==temp.getType());
+            source = transport->getTuple();
+            DebugLog(<< "Found transport: " << source);
 
-            /* determineSourceInterface might return an arbitrary port here,
-               so use the port specified in transport->port().
-            */
-            if(source.getPort()==0)
+            // .bwc. If the transport has an ambiguous interface, we need to
+            //look a little closer.
+            if(source.isAnyInterface())
             {
-               source.setPort(transport->port());
-            }
-         }
-         if (mCompression.isEnabled())
-         {
-            // Figure out remote identifier (from Via header field).
-            Via& topVia(msg->header(h_Vias).front());
+               Tuple temp = source;
+               source = determineSourceInterface(msg,target);
+               resip_assert(source.ipVersion()==temp.ipVersion() &&
+                        source.getType()==temp.getType());
 
-            if(topVia.exists(p_comp) &&
-               topVia.param(p_comp) == "sigcomp")
-            {
-               if (topVia.exists(p_sigcompId))
+               /* determineSourceInterface might return an arbitrary port here,
+                  so use the port specified in transport->port().
+               */
+               if(source.getPort()==0)
                {
-                   remoteSigcompId = topVia.param(p_sigcompId);
+                  source.setPort(transport->port());
                }
-               else
+            }
+            if (mCompression.isEnabled())
+            {
+               // Figure out remote identifier (from Via header field).
+               Via& topVia(msg->header(h_Vias).front());
+
+               if(topVia.exists(p_comp) && topVia.param(p_comp) == "sigcomp")
                {
-                   // XXX rohc-sigcomp-sip-03 says "sent-by",
-                   // but this should probably be "received" if present,
-                   // and "sent-by" otherwise.
-                   // XXX Also, the spec is ambiguous about whether
-                   // to include the port in this identifier.
-                   remoteSigcompId = topVia.sentHost();
+                  if (topVia.exists(p_sigcompId))
+                  {
+                      remoteSigcompId = topVia.param(p_sigcompId);
+                  }
+                  else
+                  {
+                     // XXX rohc-sigcomp-sip-03 says "sent-by", but this should probably 
+                     //     be "received" if present, and "sent-by" otherwise.
+                     // XXX Also, the spec is ambiguous about whether to include the port 
+                     //     in this identifier.
+                     remoteSigcompId = topVia.sentHost();
+                  }
                }
             }
          }
       }
       else
       {
-         assert(0);
+         resip_assert(0);
       }
 
       // .bwc. At this point, source, transport, and target should be
@@ -1047,8 +1159,7 @@ TransportSelector::transmit(SipMessage* msg, Tuple& target, SendData* sendData)
                      if (!contact.exists(p_Instance) &&
                          !contact.uri().exists(p_sigcompId))
                      {
-                        contact.uri().param(p_sigcompId)
-                          = mCompression.getSigcompId();
+                        contact.uri().param(p_sigcompId) = mCompression.getSigcompId();
                      }
                   }
                }
@@ -1063,7 +1174,6 @@ TransportSelector::transmit(SipMessage* msg, Tuple& target, SendData* sendData)
                      contact.uri().remove(p_addTransport);
                   }
                }
-
             }
          }
 
@@ -1144,16 +1254,19 @@ TransportSelector::transmit(SipMessage* msg, Tuple& target, SendData* sendData)
 #endif
          }
 
-         target.transportKey=transport->getKey();
-
-         // !bwc! Deprecated. Stop doing this eventually.
-         target.transport=transport;
+         resip_assert(target.mTransportKey == transport->getKey());
 
          // Call back anyone who wants to perform outbound decoration
          msg->callOutboundDecorators(source, target,remoteSigcompId);
 
-         std::auto_ptr<SendData> send(new SendData(target, 
-                                                   resip::Data::Empty, 
+         Transport::SipMessageLoggingHandler* handler = transport->getSipMessageLoggingHandler();
+         if(handler)
+         {
+            handler->outboundMessage(source, target, *msg);
+         }
+
+         std::auto_ptr<SendData> send(new SendData(target,
+                                                   resip::Data::Empty,
                                                    msg->getTransactionId(),
                                                    remoteSigcompId));
 
@@ -1168,7 +1281,7 @@ TransportSelector::transmit(SipMessage* msg, Tuple& target, SendData* sendData)
          // dynamic resizing.)
          mAvgBufferSize = (255*mAvgBufferSize + send->data.size()+128)/256;
 
-         assert(!send->data.empty());
+         resip_assert(!send->data.empty());
          DebugLog (<< "Transmitting to " << target
                    << " tlsDomain=" << msg->getTlsDomain()
                    << " via " << source
@@ -1181,28 +1294,27 @@ TransportSelector::transmit(SipMessage* msg, Tuple& target, SendData* sendData)
          }
 
          transport->send(send);
-         return true;
+         return Sent;
       }
       else
       {
          InfoLog (<< "tid=" << msg->getTransactionId() << " failed to find a transport to " << target);
          mStateMacFifo.add(new TransportFailure(msg->getTransactionId(), transportFailureReason));
-         return false;
+         return Unsent;
       }
-
    }
    catch (Transport::Exception& )
    {
       InfoLog (<< "tid=" << msg->getTransactionId() << " no route to target: " << target);
       mStateMacFifo.add(new TransportFailure(msg->getTransactionId(), TransportFailure::NoRoute));
-      return false;
+      return Unsent;
    }
 }
 
 void
 TransportSelector::retransmit(const SendData& data)
 {
-   assert(data.destination.transportKey);
+   resip_assert(data.destination.mTransportKey);
    Transport* transport = findTransportByDest(data.destination);
 
    // !jf! The previous call to transmit may have blocked or failed (It seems to
@@ -1231,6 +1343,12 @@ TransportSelector::retransmit(const SendData& data)
    if(transport)
    {
       // If this is not true, it means the transport has been removed.
+      Transport::SipMessageLoggingHandler* handler = transport->getSipMessageLoggingHandler();
+      if(handler)
+      {
+         handler->outboundRetransmit(transport->getTuple(), data.destination, data);
+      }
+       
       transport->send(std::auto_ptr<SendData>(data.clone()));
    }
 }
@@ -1242,9 +1360,9 @@ TransportSelector::closeConnection(const Tuple& peer)
    if(t)
    {
       SendData* close=new SendData(peer, 
-                                    resip::Data::Empty,
-                                    resip::Data::Empty,
-                                    resip::Data::Empty);
+                                   resip::Data::Empty,
+                                   resip::Data::Empty,
+                                   resip::Data::Empty);
       close->command = SendData::CloseConnection;
       t->send(std::auto_ptr<SendData>(close));
    }
@@ -1254,25 +1372,10 @@ unsigned int
 TransportSelector::sumTransportFifoSizes() const
 {
    unsigned int sum = 0;
-
-   for (AnyPortTupleMap::const_iterator i = mAnyPortTransports.begin();
-        i != mAnyPortTransports.end(); ++i)
+   for(TransportKeyMap::const_iterator it = mTransports.begin(); it != mTransports.end(); it++)
    {
-      sum += i->second->getFifoSize();
+      sum += it->second->getFifoSize();
    }
-
-   for (AnyPortAnyInterfaceTupleMap::const_iterator i = mAnyPortAnyInterfaceTransports.begin();
-        i != mAnyPortAnyInterfaceTransports.end(); ++i)
-   {
-      sum += i->second->getFifoSize();
-   }
-
-   for (TlsTransportMap::const_iterator i = mTlsTransports.begin();
-        i != mTlsTransports.end(); ++i)
-   {
-      sum += i->second->getFifoSize();
-   }
-
    return sum;
 }
 
@@ -1300,11 +1403,12 @@ TransportSelector::enableFlowTimer(const resip::Tuple& flow)
 Transport*
 TransportSelector::findTransportByDest(const Tuple& target)
 {
-   if(target.transportKey)
+   if(target.mTransportKey)
    {
-      if(target.transportKey <= mTransports.size())
+      TransportKeyMap::iterator it = mTransports.find(target.mTransportKey);
+      if(it != mTransports.end())
       {
-         return mTransports[target.transportKey-1];
+          return it->second;
       }
    }
    else
@@ -1348,9 +1452,13 @@ TransportSelector::findLoopbackTransportBySource(bool ignorePort, Tuple& search)
          //Compare only the first byte (the 127)
          if(i->first.isEqualWithMask(search,8,ignorePort))
          {
-            search=i->first;
-            DebugLog(<<"Match!");
-            return i->second;
+            // Not sure if this should go here or in Tuple::isEqualWithMask
+            if(i->first.getNetNs() == search.getNetNs())
+            {
+               search=i->first;
+               DebugLog(<<"Match!");
+               return i->second;
+            }
          }
       }
 #ifdef USE_IPV6
@@ -1361,7 +1469,7 @@ TransportSelector::findLoopbackTransportBySource(bool ignorePort, Tuple& search)
 #endif
       else
       {
-         assert(0);
+         resip_assert(0);
       }
    }
    
@@ -1375,9 +1483,9 @@ TransportSelector::findTransportBySource(Tuple& search, const SipMessage* msg) c
 
    if(msg && 
       !msg->getTlsDomain().empty() && 
-      (search.getType()==TLS || search.getType()==DTLS))
+      isSecure(search.getType()))
    {
-      // We should not be willing to attempt sending on a TLS/DTLS transport 
+      // We should not be willing to attempt sending on a TLS/DTLS/WSS transport 
       // that does not have the cert we're attempting to use, even if the 
       // IP/port/proto match. If we have not specified which identity we want
       // to use, then proceed with the code below.
@@ -1402,9 +1510,10 @@ TransportSelector::findTransportBySource(Tuple& search, const SipMessage* msg) c
       // 2. search for matching port on any loopback interface
       if (search.isLoopback())
       {
-         Transport *trans=findLoopbackTransportBySource( /*ignorePort*/false, search);
+         Transport *trans = findLoopbackTransportBySource( /*ignorePort*/false, search);
          if (trans)
          {
+            DebugLog(<< "findLoopbackTransportBySource(" << search << ")");
             return trans;
          }
       }
@@ -1426,7 +1535,7 @@ TransportSelector::findTransportBySource(Tuple& search, const SipMessage* msg) c
          AnyPortTupleMap::const_iterator i = mAnyPortTransports.find(search);
          if (i != mAnyPortTransports.end())
          {
-            DebugLog(<< "findTransport (any port, specific interface) => " << *(i->second));
+            DebugLog(<< "findTransport (any port, specific interface) => " << *(i->second) << " key: " << (i->first) << " search: " << search);
             return i->second;
          }
       }
@@ -1462,20 +1571,18 @@ TransportSelector::findTransportBySource(Tuple& search, const SipMessage* msg) c
    return 0;
 }
 
-
 Transport*
-TransportSelector::findTlsTransport(const Data& domainname,resip::TransportType type,resip::IpVersion version) const
+TransportSelector::findTlsTransport(const Data& domainname, TransportType type, IpVersion version) const
 {
-   assert(type==TLS || type==DTLS);
-   DebugLog (<< "Searching for " << ((type==TLS) ? "TLS" : "DTLS") << " transport for domain='"
+   resip_assert(isSecure(type));
+   DebugLog(<< "Searching for " << toData(type) << " transport for domain='"
                   << domainname << "'" << " have " << mTlsTransports.size());
 
    if (domainname == Data::Empty)
    {
-      for(TlsTransportMap::const_iterator i=mTlsTransports.begin();
-            i!=mTlsTransports.end();++i)
+      for(TlsTransportMap::const_iterator i=mTlsTransports.begin(); i != mTlsTransports.end();++i)
       {
-         if(i->first.mType==type && i->first.mVersion==version)
+         if(i->first.mTuple.getType() == type && i->first.mTuple.ipVersion() == version)
          {
             DebugLog(<<"Found a default transport.");
             return i->second;
@@ -1484,8 +1591,7 @@ TransportSelector::findTlsTransport(const Data& domainname,resip::TransportType 
    }
    else
    {
-      TlsTransportKey key(domainname,type,version);
-
+      TlsTransportKey key(domainname, type, version);
       TlsTransportMap::const_iterator i=mTlsTransports.find(key);
 
       if(i!=mTlsTransports.end())
@@ -1516,6 +1622,13 @@ void TransportSelector::unregisterMarkListener(MarkListener* listener)
    mDns.getMarkManager().unregisterMarkListener(listener);
 }
 
+EncodeStream&
+resip::operator<<(EncodeStream& ostrm, const TransportSelector::TlsTransportKey& tlsTransportKey)
+{
+   ostrm << tlsTransportKey.mTuple;
+   
+   return ostrm;
+}
 
 /* ====================================================================
  * The Vovida Software License, Version 1.0

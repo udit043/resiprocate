@@ -19,6 +19,7 @@
 #include <rutil/Logger.hxx>
 #include <rutil/DnsUtil.hxx>
 #include <rutil/Random.hxx>
+#include <resip/stack/DtmfPayloadContents.hxx>
 #include <resip/stack/SipFrag.hxx>
 #include <resip/stack/ExtensionHeader.hxx>
 #include <resip/dum/DialogUsageManager.hxx>
@@ -122,14 +123,45 @@ RemoteParticipant::getLocalRTPPort()
 void 
 RemoteParticipant::initiateRemoteCall(const NameAddr& destination)
 {
+   SharedPtr<UserProfile> profile;
+   initiateRemoteCall(destination, profile, std::multimap<resip::Data,resip::Data>());
+}
+
+void
+RemoteParticipant::initiateRemoteCall(const NameAddr& destination, SharedPtr<UserProfile>& callingProfile, const std::multimap<resip::Data,resip::Data>& extraHeaders)
+{
    SdpContents offer;
-   SharedPtr<ConversationProfile> profile = mConversationManager.getUserAgent()->getDefaultOutgoingConversationProfile();
+   SharedPtr<UserProfile> profile = callingProfile;
+   if(!profile)
+   {
+      profile = mConversationManager.getUserAgent()->getDefaultOutgoingConversationProfile();
+   }
    buildSdpOffer(mLocalHold, offer);
    SharedPtr<SipMessage> invitemsg = mDum.makeInviteSession(
       destination, 
       profile,
       &offer, 
       &mDialogSet);
+
+   std::multimap<resip::Data,resip::Data>::const_iterator it = extraHeaders.begin();
+   for( ; it != extraHeaders.end(); it++)
+   {
+      resip::Data headerName(it->first);
+      resip::Data value(it->second);
+      StackLog(<<"processing an extension header: " << headerName << ": " << value);
+      resip::Headers::Type hType = resip::Headers::getType(headerName.data(), (int)headerName.size());
+      if(hType == resip::Headers::UNKNOWN)
+      {
+         resip::ExtensionHeader h_Tmp(headerName.c_str());
+         resip::ParserContainer<resip::StringCategory>& pc = invitemsg->header(h_Tmp);
+         resip::StringCategory sc(value);
+         pc.push_back(sc);
+      }
+      else
+      {
+         WarningLog(<<"Discarding header '"<<headerName<<"', only extension headers permitted");
+      }
+   }
 
    mDialogSet.sendInvite(invitemsg);
 
@@ -794,7 +826,7 @@ void
 RemoteParticipant::provideOffer(bool postOfferAccept)
 {
    std::auto_ptr<SdpContents> offer(new SdpContents);
-   assert(mInviteSessionHandle.isValid());
+   resip_assert(mInviteSessionHandle.isValid());
    
    buildSdpOffer(mLocalHold, *offer);
 
@@ -806,7 +838,7 @@ bool
 RemoteParticipant::provideAnswer(const SdpContents& offer, bool postAnswerAccept, bool postAnswerAlert)
 {
    auto_ptr<SdpContents> answer(new SdpContents);
-   assert(mInviteSessionHandle.isValid());
+   resip_assert(mInviteSessionHandle.isValid());
    bool answerOk = buildSdpAnswer(offer, *answer);
 
    if(answerOk)
@@ -826,9 +858,12 @@ RemoteParticipant::buildSdpOffer(bool holdSdp, SdpContents& offer)
 {
    SdpContents::Session::Medium *audioMedium = 0;
    ConversationProfile *profile = dynamic_cast<ConversationProfile*>(mDialogSet.getUserProfile().get());
+   std::auto_ptr<SdpContents> _sessionCaps;
    if(!profile) // This can happen for UAC calls
    {
       profile = mConversationManager.getUserAgent()->getDefaultOutgoingConversationProfile().get();
+      // if using the default profile, we need a copy of the session caps that we can modify
+      _sessionCaps.reset(new SdpContents(profile->sessionCaps()));
    }
 
    // If we already have a local sdp for this sesion, then use this to form the next offer - doing so will ensure
@@ -858,16 +893,20 @@ RemoteParticipant::buildSdpOffer(bool holdSdp, SdpContents& offer)
             break;
          }
       }
-      assert(audioMedium);
+      resip_assert(audioMedium);
 
       // Add any codecs from our capabilities that may not be in current local sdp - since endpoint may have changed and may now be capable 
       // of handling codecs that it previously could not (common when endpoint is a B2BUA).
 
-      SdpContents& sessionCaps = dynamic_cast<ConversationProfile*>(mDialogSet.getUserProfile().get())->sessionCaps();
+      SdpContents* sessionCaps = _sessionCaps.get();
+      if(!sessionCaps)
+      {
+         sessionCaps = &(profile->sessionCaps());
+      }
       int highPayloadId = 96;  // Note:  static payload id's are in range of 0-96
       // Iterate through codecs in session caps and check if already in offer
-      for (std::list<SdpContents::Session::Codec>::iterator codecsIt = sessionCaps.session().media().front().codecs().begin();
-           codecsIt != sessionCaps.session().media().front().codecs().end(); codecsIt++)
+      for (std::list<SdpContents::Session::Codec>::iterator codecsIt = sessionCaps->session().media().front().codecs().begin();
+           codecsIt != sessionCaps->session().media().front().codecs().end(); codecsIt++)
       {		
          bool found=false;
          bool payloadIdCollision=false;
@@ -911,7 +950,7 @@ RemoteParticipant::buildSdpOffer(bool holdSdp, SdpContents& offer)
 
       // Assumes there is only 1 media stream in session caps and it the audio one
       audioMedium = &offer.session().media().front();
-      assert(audioMedium);
+      resip_assert(audioMedium);
 
       // Set the local RTP Port
       audioMedium->port() = mDialogSet.getLocalRTPPort();
@@ -1247,7 +1286,12 @@ RemoteParticipant::buildSdpAnswer(const SdpContents& offer, SdpContents& answer)
    try
    {
       // copy over session capabilities
-      answer = dynamic_cast<ConversationProfile*>(mDialogSet.getUserProfile().get())->sessionCaps();
+      ConversationProfile *profile = dynamic_cast<ConversationProfile*>(mDialogSet.getUserProfile().get());
+      if(!profile)
+      {
+         profile = mConversationManager.getUserAgent()->getDefaultOutgoingConversationProfile().get();
+      }
+      answer = profile->sessionCaps();
 
       // Set sessionid and version for this answer
       UInt64 currentTime = Timer::getTimeMicroSec();
@@ -1256,13 +1300,13 @@ RemoteParticipant::buildSdpAnswer(const SdpContents& offer, SdpContents& answer)
 
       // Set local port in answer
       // for now we only allow 1 audio media
-      assert(answer.session().media().size() == 1);
-      SdpContents::Session::Medium& mediaSessionCaps = dynamic_cast<ConversationProfile*>(mDialogSet.getUserProfile().get())->sessionCaps().session().media().front();
-      assert(mediaSessionCaps.name() == "audio");
-      assert(mediaSessionCaps.codecs().size() > 0);
+      resip_assert(answer.session().media().size() == 1);
+      SdpContents::Session::Medium& mediaSessionCaps = profile->sessionCaps().session().media().front();
+      resip_assert(mediaSessionCaps.name() == "audio");
+      resip_assert(mediaSessionCaps.codecs().size() > 0);
 
       // Copy t= field from sdp (RFC3264)
-      assert(answer.session().getTimes().size() > 0);
+      resip_assert(answer.session().getTimes().size() > 0);
       if(offer.session().getTimes().size() >= 1)
       {
          answer.session().getTimes().clear();
@@ -1558,7 +1602,7 @@ RemoteParticipant::adjustRTPStreams(bool sendingOffer)
    bool supportedCryptoSuite = false;
    bool supportedFingerprint = false;
 
-   assert(localSdp);
+   resip_assert(localSdp);
 
    /*
    InfoLog(<< "adjustRTPStreams: handle=" << mHandle << ", localSdp=" << localSdp);
@@ -1971,18 +2015,25 @@ RemoteParticipant::onNewSession(ServerInviteSessionHandle h, InviteSession::Offe
    // Check for Auto-Answer indication - support draft-ietf-answer-mode-01 
    // and Answer-After parameter of Call-Info header
    ConversationProfile* profile = dynamic_cast<ConversationProfile*>(h->getUserProfile().get());
-   assert(profile);
-   bool autoAnswerRequired;
-   bool autoAnswer = profile->shouldAutoAnswer(msg, &autoAnswerRequired);
-   if(!autoAnswer && autoAnswerRequired)  // If we can't autoAnswer but it was required, we must reject the call
+   bool autoAnswer = false;
+   if(profile)
    {
-      WarningCategory warning;
-      warning.hostname() = DnsUtil::getLocalHostName();
-      warning.code() = 399; /* Misc. */
-      warning.text() = "automatic answer forbidden";
-      setHandle(0); // Don't generate any callbacks for this rejected invite
-      h->reject(403 /* Forbidden */, &warning);
-      return;
+      bool autoAnswerRequired;
+      autoAnswer = profile->shouldAutoAnswer(msg, &autoAnswerRequired);
+      if(!autoAnswer && autoAnswerRequired)  // If we can't autoAnswer but it was required, we must reject the call
+      {
+         WarningCategory warning;
+         warning.hostname() = DnsUtil::getLocalHostName();
+         warning.code() = 399; /* Misc. */
+         warning.text() = "automatic answer forbidden";
+         setHandle(0); // Don't generate any callbacks for this rejected invite
+         h->reject(403 /* Forbidden */, &warning);
+         return;
+      }
+   }
+   else
+   {
+      WarningLog(<<"bypassing logic for Auto-Answer");
    }
   
    // notify of new participant
@@ -2017,7 +2068,7 @@ void
 RemoteParticipant::onProvisional(ClientInviteSessionHandle h, const SipMessage& msg)
 {
    InfoLog(<< "onProvisional: handle=" << mHandle << ", " << msg.brief());
-   assert(msg.header(h_StatusLine).responseCode() != 100);
+   resip_assert(msg.header(h_StatusLine).responseCode() != 100);
 
    if(!mDialogSet.isStaleFork(getDialogId()))
    {
@@ -2099,7 +2150,7 @@ RemoteParticipant::onTerminated(InviteSessionHandle h, InviteSessionHandler::Ter
       InfoLog(<< "onTerminated: handle=" << mHandle << ", ended due to a timeout");
       break;
    default:
-      assert(false);
+      resip_assert(false);
       break;
    }
    unsigned int statusCode = 0;
@@ -2233,7 +2284,7 @@ void
 RemoteParticipant::onOfferRequestRejected(InviteSessionHandle h, const SipMessage& msg)
 {
    InfoLog(<< "onOfferRequestRejected: handle=" << mHandle << ", " << msg.brief());
-   assert(0);  // We never send a request for an offer (ie. Invite with no SDP)
+   resip_assert(0);  // We never send a request for an offer (ie. Invite with no SDP)
 }
 
 void
@@ -2245,24 +2296,43 @@ RemoteParticipant::onRemoteSdpChanged(InviteSessionHandle h, const SipMessage& m
 }
 
 void
-RemoteParticipant::onInfo(InviteSessionHandle, const SipMessage& msg)
+RemoteParticipant::onInfo(InviteSessionHandle session, const SipMessage& msg)
 {
    InfoLog(<< "onInfo: handle=" << mHandle << ", " << msg.brief());
-   //assert(0);
+   if(mHandle)
+   {
+      DtmfPayloadContents* contents = dynamic_cast<DtmfPayloadContents*>(msg.getContents());
+      if(contents)
+      {
+         DtmfPayloadContents::DtmfPayload& payload = contents->dtmfPayload();
+         mConversationManager.onDtmfEvent(mHandle, payload.getEventCode(), payload.getDuration(), true);
+         session->acceptNIT();
+      }
+      else
+      {
+         WarningLog(<<"INFO message without dtmf-relay payload, rejecting");
+         session->rejectNIT();
+      }
+   }
+   else
+   {
+      WarningLog(<<"INFO message received, but mHandle not set, rejecting");
+      session->rejectNIT();
+   }
 }
 
 void
 RemoteParticipant::onInfoSuccess(InviteSessionHandle, const SipMessage& msg)
 {
    InfoLog(<< "onInfoSuccess: handle=" << mHandle << ", " << msg.brief());
-   assert(0);  // We never send an info request
+   resip_assert(0);  // We never send an info request
 }
 
 void
 RemoteParticipant::onInfoFailure(InviteSessionHandle, const SipMessage& msg)
 {
    InfoLog(<< "onInfoFailure: handle=" << mHandle << ", " << msg.brief());
-   assert(0);  // We never send an info request
+   resip_assert(0);  // We never send an info request
 }
 
 void

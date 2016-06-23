@@ -1,7 +1,7 @@
 # $Id$
 
 EXTRA_DIST = Doxyfile
-EXTRA_DIST += dum_10_0.vcxproj dum_10_0.vcxproj.filters
+EXTRA_DIST += *.vcxproj *.vcxproj.filters
 EXTRA_DIST += *.vcproj
 EXTRA_DIST += doc
 
@@ -12,7 +12,10 @@ AM_CXXFLAGS = -I $(top_srcdir)
 
 lib_LTLIBRARIES = libdum.la
 
-libdum_la_LIBADD = @LIBSSL_LIBADD@ @LIBRADIUS_LIBADD@
+libdum_la_LIBADD = ../stack/libresip.la
+libdum_la_LIBADD += ../../rutil/librutil.la
+libdum_la_LIBADD += @LIBSSL_LIBADD@ @LIBRADIUS_LIBADD@
+libdum_la_LIBADD += @LIBSTL_LIBADD@
 libdum_la_LDFLAGS = @LIBTOOL_VERSION_RELEASE@ -export-dynamic
 
 libdum_la_SOURCES =   \
@@ -52,6 +55,7 @@ libdum_la_SOURCES =   \
 	Handle.cxx \
 	Handled.cxx \
 	InMemoryRegistrationDatabase.cxx \
+	InMemorySyncPubDb.cxx \
 	InMemorySyncRegDb.cxx \
 	InviteSession.cxx \
 	InviteSessionCreator.cxx \
@@ -78,7 +82,8 @@ libdum_la_SOURCES =   \
 	SubscriptionHandler.cxx \
 	SubscriptionCreator.cxx \
 	SubscriptionState.cxx \
-        TlsPeerAuthManager.cxx \
+    TlsPeerAuthManager.cxx \
+    WsCookieAuthManager.cxx \
 	KeepAliveManager.cxx \
 	KeepAliveTimeout.cxx \
 	NetworkAssociation.cxx \
@@ -157,6 +162,7 @@ nobase_duminclude_HEADERS = AppDialog.hxx \
 	HttpProvider.hxx \
 	IdentityHandler.hxx \
 	InMemoryRegistrationDatabase.hxx \
+	InMemorySyncPubDb.hxx \
 	InMemorySyncRegDb.hxx \
 	InviteDialogs.hxx \
 	InviteSessionCreator.hxx \
@@ -178,6 +184,7 @@ nobase_duminclude_HEADERS = AppDialog.hxx \
 	Profile.hxx \
 	PublicationCreator.hxx \
 	PublicationHandler.hxx \
+	PublicationPersistenceManager.hxx \
 	RADIUSServerAuthManager.hxx \
 	RedirectHandler.hxx \
 	RedirectManager.hxx \
@@ -202,6 +209,7 @@ nobase_duminclude_HEADERS = AppDialog.hxx \
 	SubscriptionState.hxx \
 	TargetCommand.hxx \
         TlsPeerAuthManager.hxx \
+        WsCookieAuthManager.hxx \
 	UsageUseException.hxx \
 	UserAuthInfo.hxx \
 	UserProfile.hxx

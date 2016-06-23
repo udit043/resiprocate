@@ -14,6 +14,7 @@
 #include "resip/dum/Handles.hxx"
 #include "resip/dum/MergedRequestKey.hxx"
 #include "resip/dum/RegistrationPersistenceManager.hxx"
+#include "resip/dum/PublicationPersistenceManager.hxx"
 #include "resip/dum/ServerSubscription.hxx"
 #include "rutil/BaseException.hxx"
 #include "rutil/SharedPtr.hxx"
@@ -111,7 +112,8 @@ class DialogUsageManager : public HandleManager, public TransactionUser
 
       void forceShutdown(DumShutdownHandler*);
 
-      void addTransport( TransportType protocol,
+      // Use SipStack::addTransport instead
+      RESIP_DEPRECATED(void addTransport( TransportType protocol,
                          int port=0, 
                          IpVersion version=V4,
                          const Data& ipInterface = Data::Empty, 
@@ -120,7 +122,7 @@ class DialogUsageManager : public HandleManager, public TransactionUser
                                                                   // based stuff 
                          const Data& privateKeyPassPhrase = Data::Empty,
                          SecurityTypes::SSLType sslType = SecurityTypes::TLSv1,
-                         unsigned transportFlags = 0);
+                         unsigned transportFlags = 0));
 
       SipStack& getSipStack();
       const SipStack& getSipStack() const;
@@ -185,10 +187,11 @@ class DialogUsageManager : public HandleManager, public TransactionUser
       void removeExternalMessageHandler(ExternalMessageHandler* handler);
       void clearExternalMessageHandler();
 
-      /// Sets a manager to handle storage of registration state
+      /// Sets a manager to handle storage of registration or publication state
       void setRegistrationPersistenceManager(RegistrationPersistenceManager*);
-
-      void setRemoteCertStore(std::auto_ptr<RemoteCertStore> store);
+      RegistrationPersistenceManager* getRegistrationPersistenceManager() { return mRegistrationPersistenceManager; }
+      void setPublicationPersistenceManager(PublicationPersistenceManager*);
+      PublicationPersistenceManager* getPublicationPersistenceManager() { return mPublicationPersistenceManager; }
       
       // The message is owned by the underlying datastructure and may go away in
       // the future. If the caller wants to keep it, it should make a copy. The
@@ -344,6 +347,9 @@ class DialogUsageManager : public HandleManager, public TransactionUser
       void applyToAllClientSubscriptions(ClientSubscriptionFunctor*);
       void applyToAllServerSubscriptions(ServerSubscriptionFunctor*);
 
+      void endAllServerSubscriptions(TerminateReason reason = Deactivated);
+      void endAllServerPublications();
+
       /// Note:  Implementations of Postable must delete the message passed via post
       void registerForConnectionTermination(Postable*);
       void unRegisterForConnectionTermination(Postable*);
@@ -353,6 +359,8 @@ class DialogUsageManager : public HandleManager, public TransactionUser
       // The caller is responsible for deleting the DialogEventStateManager
       // at the same time it deletes other handlers when DUM is destroyed.
       DialogEventStateManager* createDialogEventStateManager(DialogEventHandler* handler);
+
+      void setAdvertisedCapabilities(SipMessage& msg, SharedPtr<UserProfile> userProfile);
 
    protected:
       virtual void onAllHandlesDestroyed();      
@@ -459,7 +467,7 @@ class DialogUsageManager : public HandleManager, public TransactionUser
       bool validateContent(const SipMessage& request);
       bool validateAccept(const SipMessage& request);
       bool validateTo(const SipMessage& request);
-      bool validate100RelSuport(const SipMessage& request);
+      bool validate100RelSupport(const SipMessage& request);
       
       bool mergeRequest(const SipMessage& request);
 
@@ -507,6 +515,7 @@ class DialogUsageManager : public HandleManager, public TransactionUser
       RequestValidationHandler* mRequestValidationHandler;
 
       RegistrationPersistenceManager *mRegistrationPersistenceManager;
+      PublicationPersistenceManager *mPublicationPersistenceManager;
 
       OutOfDialogHandler* getOutOfDialogHandler(const MethodTypes type);
 

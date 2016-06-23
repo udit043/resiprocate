@@ -2,6 +2,9 @@
 #include "config.h"
 #endif
 
+// Need to include this early to avoid problems with __STDC_FORMAT_MACROS
+#include "rutil/compat.hxx"
+
 #include "repro/BerkeleyDb.hxx"
 #include "repro/ReproServerAuthManager.hxx"
 #include "repro/monkeys/AmIResponsible.hxx"
@@ -45,8 +48,8 @@ TfmProxyConfig::TfmProxyConfig(AbstractDb* db, const CommandLineParser& args)
    insertConfigValue("QValueMsBetweenForkGroups", "5000");
    insertConfigValue("QValueMsBeforeCancel", "5000");
 
-   insertConfigValue("ForceRecordRouting", "false");
-   insertConfigValue("RecordRouteUri", resip::Data::from(args.mRecordRoute));
+   insertConfigValue("ForceRecordRouting", "true");
+   //insertConfigValue("RecordRouteUri", "sip:127.0.0.1:5060");  // Set below per transport
 }
 
 static ProcessorChain&  
@@ -130,34 +133,36 @@ TestRepro::TestRepro(const resip::Data& name,
                      const resip::Data& nwInterface,
                      Security* security) : 
    TestProxy(name, host, args.mUdpPorts, args.mTcpPorts, args.mTlsPorts, args.mDtlsPorts, nwInterface),
+   mPollGrp(FdPollGrp::create()),  // Will create EPoll implementation if available, otherwise FdPoll
+   mInterruptor(new EventThreadInterruptor(*mPollGrp)),
 #ifdef USE_SIGCOMP
-   mStack(security,
-            DnsStub::EmptyNameserverList,
-            0,
-            false,
-            0,
-            new Compression(Compression::DEFLATE)),
+   mStack(new SipStack(security,
+          DnsStub::EmptyNameserverList,
+          mInterruptor,
+          false,
+          0,
+          new Compression(Compression::DEFLATE))),
 #else
-   mStack(security),
+   mStack(new SipStack(security, DnsStub::EmptyNameserverList, mInterruptor)),
 #endif
-   mStackThread(mStack),
+   mStackThread(new EventStackThread(*mStack, *mInterruptor, *mPollGrp)),
    mRegistrar(),
    mProfile(new MasterProfile),
    mDb(new BerkeleyDb),
    mConfig(mDb, args),
-   mAuthRequestDispatcher(new Dispatcher(std::auto_ptr<Worker>(new UserAuthGrabber(mConfig.getDataStore()->mUserStore)),
-                                         &mStack, 2)),
+   mAuthRequestDispatcher(new Dispatcher(std::auto_ptr<Worker>(new UserAuthGrabber(mConfig.getDataStore()->mUserStore)), 
+                                         mStack, 2)),
    mRequestProcessors(Processor::REQUEST_CHAIN),
    mResponseProcessors(Processor::RESPONSE_CHAIN),
    mTargetProcessors(Processor::TARGET_CHAIN),
    mRegData(),
-   mProxy(mStack, 
+   mProxy(*mStack, 
           mConfig,
-          makeRequestProcessorChain(mRequestProcessors, mConfig, mAuthRequestDispatcher, mRegData,&mStack),
-          makeResponseProcessorChain(mResponseProcessors,mRegData),
-          makeTargetProcessorChain(mTargetProcessors,mConfig)),
-   mDum(mStack),
-   mDumThread(mDum)
+          makeRequestProcessorChain(mRequestProcessors, mConfig, mAuthRequestDispatcher, mRegData, mStack),
+          makeResponseProcessorChain(mResponseProcessors, mRegData),
+          makeTargetProcessorChain(mTargetProcessors, mConfig)),
+   mDum(new DialogUsageManager(*mStack)),
+   mDumThread(new DumThread(*mDum))
 {
    resip::InteropHelper::setRRTokenHackEnabled(args.mEnableFlowTokenHack);
    resip::InteropHelper::setOutboundSupported(true);
@@ -167,8 +172,8 @@ TestRepro::TestRepro(const resip::Data& name,
 
    // !bwc! TODO Once we have something we _do_ support, put that here.
    mProxy.addSupportedOption("p-fakeoption");
-   mStack.addAlias("localhost",5060);
-   mStack.addAlias("localhost",5061);
+   mStack->addAlias("localhost",5060);
+   mStack->addAlias("localhost",5061);
 
    std::list<resip::Data> domains;
    domains.push_back("127.0.0.1");
@@ -176,7 +181,7 @@ TestRepro::TestRepro(const resip::Data& name,
    
    try
    {
-      mStack.addTransport(UDP, 
+      Transport *t = mStack->addTransport(UDP, 
                            5060, 
                            V4,
                            StunDisabled,
@@ -185,13 +190,17 @@ TestRepro::TestRepro(const resip::Data& name,
                            resip::Data::Empty,
                            resip::SecurityTypes::TLSv1,
                            0);
+      NameAddr rr;
+      rr.uri().host() = "127.0.0.1";
+      rr.uri().port() = 5060;
+      mProxy.addTransportRecordRoute(t->getKey(), rr);
    }
    catch(...)
    {}
 
    try
    {
-      mStack.addTransport(TCP, 
+      Transport *t = mStack->addTransport(TCP, 
                            5060, 
                            V4,
                            StunDisabled,
@@ -200,6 +209,11 @@ TestRepro::TestRepro(const resip::Data& name,
                            resip::Data::Empty,
                            resip::SecurityTypes::TLSv1,
                            0);
+      NameAddr rr;
+      rr.uri().host() = "127.0.0.1";
+      rr.uri().port() = 5060;
+      rr.uri().param(resip::p_transport)="tcp";
+      mProxy.addTransportRecordRoute(t->getKey(), rr);
    }
    catch(...)
    {}
@@ -207,7 +221,7 @@ TestRepro::TestRepro(const resip::Data& name,
 #ifdef RESIP_USE_SCTP
    try
    {
-      mStack.addTransport(SCTP, 
+      Transport *t = mStack->addTransport(SCTP, 
                            5060, 
                            V4,
                            StunDisabled,
@@ -216,6 +230,11 @@ TestRepro::TestRepro(const resip::Data& name,
                            resip::Data::Empty,
                            resip::SecurityTypes::TLSv1,
                            0);
+      NameAddr rr;
+      rr.uri().host() = "127.0.0.1";
+      rr.uri().port() = 5060;
+      rr.uri().param(resip::p_transport)="sctp";
+      mProxy.addTransportRecordRoute(t->getKey(), rr);
    }
    catch(...)
    {}
@@ -227,7 +246,7 @@ TestRepro::TestRepro(const resip::Data& name,
    
    try
    {
-      mStack.addTransport(TLS, 
+      Transport *t = mStack->addTransport(TLS, 
                            5061, 
                            V4, 
                            StunDisabled, 
@@ -236,6 +255,11 @@ TestRepro::TestRepro(const resip::Data& name,
                            resip::Data::Empty,
                            resip::SecurityTypes::TLSv1,
                            0);
+      NameAddr rr;
+      rr.uri().host() = "localhost";
+      rr.uri().port() = 5061;
+      rr.uri().param(resip::p_transport)="tls";
+      mProxy.addTransportRecordRoute(t->getKey(), rr);
    }
    catch(...)
    {}
@@ -244,7 +268,7 @@ TestRepro::TestRepro(const resip::Data& name,
    
    std::vector<Data> enumSuffixes;
    enumSuffixes.push_back(args.mEnumSuffix);
-   mStack.setEnumSuffixes(enumSuffixes);
+   mStack->setEnumSuffixes(enumSuffixes);
 
    mProxy.addSupportedOption("outbound");
    mProxy.addSupportedOption("p-fakeoption");
@@ -253,10 +277,10 @@ TestRepro::TestRepro(const resip::Data& name,
    mProfile->addSupportedMethod(resip::REGISTER);
    mProfile->addSupportedScheme(Symbols::Sips);
 
-   mDum.setMasterProfile(mProfile);
-   mDum.setServerRegistrationHandler(&mRegistrar);
-   mDum.setRegistrationPersistenceManager(&mRegData);
-   mDum.addDomain(host);
+   mDum->setMasterProfile(mProfile);
+   mDum->setServerRegistrationHandler(&mRegistrar);
+   mDum->setRegistrationPersistenceManager(&mRegData);
+   mDum->addDomain(host);
    
    // Install rules so that the registrar only gets REGISTERs
    resip::MessageFilterRule::MethodList methodList;
@@ -266,45 +290,54 @@ TestRepro::TestRepro(const resip::Data& name,
    ruleList.push_back(MessageFilterRule(resip::MessageFilterRule::SchemeList(),
                                         resip::MessageFilterRule::Any,
                                         methodList) );
-   mDum.setMessageFilterRuleList(ruleList);
+   mDum->setMessageFilterRuleList(ruleList);
     
-   SharedPtr<ServerAuthManager> authMgr(new ReproServerAuthManager(mDum, 
+   SharedPtr<ServerAuthManager> authMgr(new ReproServerAuthManager(*mDum, 
                                                                    mAuthRequestDispatcher,
                                                                    mConfig.getDataStore()->mAclStore, 
                                                                    true, 
                                                                    false,
                                                                    true));
-   mDum.setServerAuthManager(authMgr);    
+   mDum->setServerAuthManager(authMgr);    
 
-   mStack.registerTransactionUser(mProxy);
+   mStack->registerTransactionUser(mProxy);
 
    if(args.mUseCongestionManager)
    {
       mCongestionManager.reset(new GeneralCongestionManager(
                                           GeneralCongestionManager::WAIT_TIME, 
                                           200));
-      mStack.setCongestionManager(mCongestionManager.get());
+      mStack->setCongestionManager(mCongestionManager.get());
    }
 
    if(args.mThreadedStack)
    {
-      mStack.run();
+      mStack->run();
    }
 
-   mStackThread.run();
+   mStackThread->run();
    mProxy.run();
-   mDumThread.run();
+   mDumThread->run();
 }
 
 TestRepro::~TestRepro()
 {
-   mDumThread.shutdown();
-   mDumThread.join();
+   mDumThread->shutdown();
+   mDumThread->join();
    delete mAuthRequestDispatcher;
-   mStackThread.shutdown();
-   mStackThread.join();
-   mStack.shutdownAndJoinThreads();
-   mStack.setCongestionManager(0);
+   mStack->shutdownAndJoinThreads();
+   mStackThread->shutdown();
+   mStackThread->join();
+   mStack->setCongestionManager(0);
+
+   delete mDum;
+   delete mDumThread;
+   delete mStack;
+   delete mStackThread;
+   delete mInterruptor;
+   delete mPollGrp;
+   // Note:  mStack descructor will delete mSecurity
+  
    delete mDb;
 }
 
@@ -350,8 +383,26 @@ TestRepro::deleteRoute(const resip::Data& matchingPattern,
 }
 
 bool
-TestRepro::addTrustedHost(const resip::Data& host, resip::TransportType transport, short port)
+TestRepro::addTrustedHost(const resip::Data& host, resip::TransportType transport, short port, short mask, short family)
 {
-   return mConfig.getDataStore()->mAclStore.addAcl(host, port, static_cast<const short&>(transport));
+   return mConfig.getDataStore()->mAclStore.addAcl(
+       transport == TLS ? host : Data::Empty,
+       transport == TLS ? Data::Empty : host, 
+       mask,
+       port,
+       family,
+       static_cast<const short&>(transport));
+}
+
+void 
+TestRepro::deleteTrustedHost(const resip::Data& host, resip::TransportType transport, short port, short mask, short family)
+{
+   mConfig.getDataStore()->mAclStore.eraseAcl(
+       transport == TLS ? host : Data::Empty,
+       transport == TLS ? Data::Empty : host, 
+       mask,
+       port,
+       family,
+       static_cast<const short&>(transport));
 }
 

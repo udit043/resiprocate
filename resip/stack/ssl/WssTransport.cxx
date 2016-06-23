@@ -11,7 +11,7 @@
 #include "rutil/Socket.hxx"
 #include "rutil/Logger.hxx"
 #include "resip/stack/ssl/WssTransport.hxx"
-#include "resip/stack/ssl/TlsConnection.hxx"
+#include "resip/stack/ssl/WssConnection.hxx"
 #include "resip/stack/ssl/Security.hxx"
 #include "rutil/WinLeakCheck.hxx"
 
@@ -31,8 +31,16 @@ WssTransport::WssTransport(Fifo<TransactionMessage>& fifo,
                            Compression &compression,
                            unsigned transportFlags,
                            SecurityTypes::TlsClientVerificationMode cvm,
-                           bool useEmailAsSIP):
-   TlsBaseTransport(fifo, portNum, version, interfaceObj, security, sipDomain, sslType, transport(), socketFunc, compression, transportFlags, cvm, useEmailAsSIP)
+                           bool useEmailAsSIP,
+                           SharedPtr<WsConnectionValidator> connectionValidator,
+                           SharedPtr<WsCookieContextFactory> cookieContextFactory,
+                           const Data& certificateFilename, 
+                           const Data& privateKeyFilename,
+                           const Data& privateKeyPassPhrase):
+   TlsBaseTransport(fifo, portNum, version, interfaceObj, security, sipDomain, sslType, WSS, socketFunc, 
+                    compression, transportFlags, cvm, useEmailAsSIP, certificateFilename, privateKeyFilename,
+                    privateKeyPassPhrase),
+   WsBaseTransport(connectionValidator, cookieContextFactory)
 {
    InfoLog (<< "Creating WSS transport for domain " 
             << sipDomain << " interface=" << interfaceObj 
@@ -45,6 +53,17 @@ WssTransport::WssTransport(Fifo<TransactionMessage>& fifo,
 WssTransport::~WssTransport()
 {
 }
+
+Connection*
+WssTransport::createConnection(const Tuple& who, Socket fd, bool server)
+{
+   resip_assert(this);
+   Connection* conn = new WssConnection(this,who, fd, mSecurity, server,
+                                        tlsDomain(), mSslType, mCompression,
+                                        mConnectionValidator);
+   return conn;
+}
+
 
 #endif /* USE_SSL */
 

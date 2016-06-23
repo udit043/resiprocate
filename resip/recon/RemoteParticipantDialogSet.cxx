@@ -3,7 +3,7 @@
 #endif
 
 // sipX includes
-#ifdef WIN32
+#if (_MSC_VER >= 1600)
 #include <stdint.h>       // Use Visual Studio's stdint.h
 #define _MSC_STDINT_H_    // This define will ensure that stdint.h in sipXport tree is not used
 #endif
@@ -36,12 +36,6 @@
 
 //#define DISABLE_FLOWMANAGER_IF_NO_NAT_TRAVERSAL
 #include <rutil/WinLeakCheck.hxx>
-
-#ifdef WIN32
-   #define sleepMs(t) Sleep(t)
-#else
-   #define sleepMs(t) usleep(t*1000)
-#endif
 
 using namespace recon;
 using namespace resip;
@@ -125,8 +119,9 @@ RemoteParticipantDialogSet::getLocalRTPPort()
       }
 
       OsStatus ret;
+      Data connectionAddr = profile->sessionCaps().session().connection().getAddress();
       // Create localBinding Tuple - note:  transport may be changed depending on NAT traversal mode
-      StunTuple localBinding(StunTuple::UDP, asio::ip::address::from_string(profile->sessionCaps().session().connection().getAddress().c_str()), mLocalRTPPort); 
+      StunTuple localBinding(StunTuple::UDP, asio::ip::address::from_string(connectionAddr.c_str()), mLocalRTPPort);
 
       switch(profile->natTraversalMode())
       {
@@ -209,7 +204,7 @@ RemoteParticipantDialogSet::getLocalRTPPort()
       else
       {
          ret = getMediaInterface()->getInterface()->createConnection(mMediaConnectionId,
-                                                     profile->sessionCaps().session().connection().getAddress().c_str(),
+                                                     connectionAddr.c_str(),
                                                      mLocalRTPPort);
          mRtpTuple = localBinding;  // Just treat media stream as immediately ready using the localBinding in the SDP
       }
@@ -289,7 +284,7 @@ RemoteParticipantDialogSet::processMediaStreamReadyEvent(const StunTuple& rtpTup
                            mPendingOfferAnswer.mInviteSessionHandle, 
                            mPendingOfferAnswer.mPostOfferAnswerAccept, 
                            mPendingOfferAnswer.mPostAnswerAlert);
-      assert(mPendingOfferAnswer.mSdp.get() == 0);
+      resip_assert(mPendingOfferAnswer.mSdp.get() == 0);
    }
 }
 
@@ -381,7 +376,7 @@ RemoteParticipantDialogSet::provideOffer(std::auto_ptr<resip::SdpContents> offer
    }
    else
    {
-      assert(mPendingOfferAnswer.mSdp.get() == 0);
+      resip_assert(mPendingOfferAnswer.mSdp.get() == 0);
       mPendingOfferAnswer.mOffer = true;
       mPendingOfferAnswer.mSdp = offer;
       mPendingOfferAnswer.mInviteSessionHandle = inviteSessionHandle;
@@ -399,7 +394,7 @@ RemoteParticipantDialogSet::provideAnswer(std::auto_ptr<resip::SdpContents> answ
    }
    else
    {
-      assert(mPendingOfferAnswer.mSdp.get() == 0);
+      resip_assert(mPendingOfferAnswer.mSdp.get() == 0);
       mPendingOfferAnswer.mOffer = false;
       mPendingOfferAnswer.mSdp = answer;
       mPendingOfferAnswer.mInviteSessionHandle = inviteSessionHandle;
@@ -481,11 +476,11 @@ RemoteParticipantDialogSet::getMediaInterface()
       else if(mDialogs.size() > 0)
       {
          // All participants in the set will have the same media interface - query from first
-         assert(mDialogs.begin()->second);
+         resip_assert(mDialogs.begin()->second);
          mMediaInterface = mDialogs.begin()->second->getMediaInterface();
       }
    }
-   assert(mMediaInterface);
+   resip_assert(mMediaInterface);
    return mMediaInterface;
 }
 
@@ -611,7 +606,7 @@ RemoteParticipantDialogSet::createSRTPSession(MediaStream::SrtpCryptoSuite crypt
 RemoteParticipant* 
 RemoteParticipantDialogSet::createUACOriginalRemoteParticipant(ParticipantHandle handle)
 {
-   assert(!mUACOriginalRemoteParticipant);
+   resip_assert(!mUACOriginalRemoteParticipant);
    RemoteParticipant *participant = new RemoteParticipant(handle, mConversationManager, mDum, *this);  
    mUACOriginalRemoteParticipant = participant;
    mActiveRemoteParticipantHandle = participant->getParticipantHandle();  // Store this since it may not be safe to access mUACOriginalRemoteParticipant pointer after corresponding Dialog has been created
@@ -683,7 +678,7 @@ RemoteParticipantDialogSet::setProposedSdp(ParticipantHandle handle, const resip
 void 
 RemoteParticipantDialogSet::setUACConnected(const DialogId& dialogId, ParticipantHandle partHandle)
 {
-   assert(mUACConnectedDialogId.getCallId().empty());
+   resip_assert(mUACConnectedDialogId.getCallId().empty());
    mUACConnectedDialogId = dialogId;
    mActiveRemoteParticipantHandle = partHandle;
    if(mForkSelectMode == ConversationManager::ForkSelectAutomatic)
@@ -751,7 +746,7 @@ RemoteParticipantDialogSet::onTrying(AppDialogSetHandle, const SipMessage& msg)
 void 
 RemoteParticipantDialogSet::onNonDialogCreatingProvisional(AppDialogSetHandle, const SipMessage& msg)
 {
-   assert(msg.header(h_StatusLine).responseCode() != 100);
+   resip_assert(msg.header(h_StatusLine).responseCode() != 100);
    // It possible to get a provisional from another fork after receiving a 200 - if so, don't generate an event
    if(!isUACConnected() && mUACOriginalRemoteParticipant)
    {

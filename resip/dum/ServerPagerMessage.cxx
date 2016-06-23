@@ -72,7 +72,7 @@ void ServerPagerMessage::endCommand()
 void 
 ServerPagerMessage::dispatch(const SipMessage& msg)
 {
-	assert(msg.isRequest());
+	resip_assert(msg.isRequest());
     ServerPagerMessageHandler* handler = mDum.mServerPagerMessageHandler;
     
     //?dcm? check in DialogUsageManager
@@ -94,7 +94,7 @@ ServerPagerMessage::dispatch(const DumTimeout& msg)
 void 
 ServerPagerMessage::send(SharedPtr<SipMessage> response)
 {
-   assert(response->isResponse());
+   resip_assert(response->isResponse());
    mDum.send(response);
    delete this;
 }
@@ -121,7 +121,7 @@ public:
    {
       if(mServerPagerMessageHandle.isValid())
       {
-         mServerPagerMessageHandle->accept(mStatusCode);
+         mServerPagerMessageHandle->send(mServerPagerMessageHandle->accept(mStatusCode));
       }
    }
 
@@ -161,7 +161,7 @@ public:
    {
       if(mServerPagerMessageHandle.isValid())
       {
-         mServerPagerMessageHandle->reject(mStatusCode);
+         mServerPagerMessageHandle->send(mServerPagerMessageHandle->reject(mStatusCode));
       }
    }
 
@@ -187,7 +187,6 @@ ServerPagerMessage::dump(EncodeStream& strm) const
    mRequest.encodeBrief(strm);
    return strm;
 }
-
 
 
 /* ====================================================================

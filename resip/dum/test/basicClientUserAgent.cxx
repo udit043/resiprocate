@@ -6,6 +6,7 @@
 #include <rutil/Logger.hxx>
 #include <rutil/DnsUtil.hxx>
 #include <rutil/MD5Stream.hxx>
+#include <rutil/FdPoll.hxx>
 #include <resip/stack/SdpContents.hxx>
 #include <resip/stack/PlainContents.hxx>
 #include <resip/stack/ConnectionTerminated.hxx>
@@ -118,11 +119,13 @@ BasicClientUserAgent::BasicClientUserAgent(int argc, char** argv) :
 #else
    mSecurity(0),
 #endif
-   mSelectInterruptor(new SelectInterruptor),
-   mStack(new SipStack(mSecurity, DnsStub::EmptyNameserverList, mSelectInterruptor)),
-   mStackThread(new InterruptableStackThread(*mStack, *mSelectInterruptor)),
+   mPollGrp(FdPollGrp::create()),  // Will create EPoll implementation if available, otherwise FdPoll
+   mInterruptor(new EventThreadInterruptor(*mPollGrp)),
+   mStack(new SipStack(mSecurity, DnsStub::EmptyNameserverList, mInterruptor, false, 0, 0, mPollGrp)),
+   mStackThread(new EventStackThread(*mStack, *mInterruptor, *mPollGrp)),
    mDum(new DialogUsageManager(*mStack)),
    mDumShutdownRequested(false),
+   mShuttingdown(false),
    mDumShutdown(false),
    mRegistrationRetryDelayTime(0),
    mCurrentNotifyTimerId(0)
@@ -153,16 +156,16 @@ BasicClientUserAgent::BasicClientUserAgent(int argc, char** argv) :
    mProfile->addSupportedMethod(CANCEL);
    mProfile->addSupportedMethod(OPTIONS);
    mProfile->addSupportedMethod(BYE);
-   //mProfile->addSupportedMethod(REFER);    
-   mProfile->addSupportedMethod(NOTIFY);    
-   mProfile->addSupportedMethod(SUBSCRIBE); 
-   //mProfile->addSupportedMethod(UPDATE);    
-   mProfile->addSupportedMethod(INFO);    
-   mProfile->addSupportedMethod(MESSAGE);    
-   //mProfile->addSupportedMethod(PRACK);     
+   //mProfile->addSupportedMethod(REFER);
+   mProfile->addSupportedMethod(NOTIFY);
+   mProfile->addSupportedMethod(SUBSCRIBE);
+   //mProfile->addSupportedMethod(UPDATE);
+   mProfile->addSupportedMethod(INFO);
+   mProfile->addSupportedMethod(MESSAGE);
+   mProfile->addSupportedMethod(PRACK);
    //mProfile->addSupportedOptionTag(Token(Symbols::C100rel));  // Automatically added when using setUacReliableProvisionalMode
    mProfile->setUacReliableProvisionalMode(MasterProfile::Supported);
-   //mProfile->setUasReliableProvisionalMode(MasterProfile::Supported);  // TODO - needs support in DUM, currently unimplemented
+   mProfile->setUasReliableProvisionalMode(MasterProfile::SupportedEssential);  
 
    // Support Languages
    mProfile->clearSupportedLanguages();
@@ -308,19 +311,22 @@ BasicClientUserAgent::BasicClientUserAgent(int argc, char** argv) :
 
 BasicClientUserAgent::~BasicClientUserAgent()
 {
+   mStack->shutdownAndJoinThreads();
    mStackThread->shutdown();
    mStackThread->join();
 
    delete mDum;
    delete mStack;
    delete mStackThread;
-   delete mSelectInterruptor;
+   delete mInterruptor;
+   delete mPollGrp;
    // Note:  mStack descructor will delete mSecurity
 }
 
 void
 BasicClientUserAgent::startup()
 {
+   mStack->run();
    mStackThread->run(); 
 
    if (mRegisterDuration)
@@ -354,6 +360,7 @@ BasicClientUserAgent::shutdown()
 {
    assert(mDum);
    mDumShutdownRequested = true; // Set flag so that shutdown operations can be run in dum process thread
+   mShuttingdown = true;  // This flag stays on during the shutdown process where as mDumShutdownRequested will get toggled back to false
 }
 
 bool
@@ -521,6 +528,11 @@ void
 BasicClientUserAgent::onSuccess(ClientRegistrationHandle h, const SipMessage& msg)
 {
    InfoLog(<< "onSuccess(ClientRegistrationHandle): msg=" << msg.brief());
+   if(mShuttingdown)
+   {
+       h->end();
+       return;
+   }
    if(mRegHandle.getId() == 0)  // Note: reg handle id will only be 0 on first successful registration
    {
       // Check if we should try to form a test subscription
@@ -546,6 +558,10 @@ BasicClientUserAgent::onFailure(ClientRegistrationHandle h, const SipMessage& ms
 {
    InfoLog(<< "onFailure(ClientRegistrationHandle): msg=" << msg.brief());
    mRegHandle = h;
+   if(mShuttingdown)
+   {
+       h->end();
+   }
 }
 
 void
@@ -559,6 +575,10 @@ int
 BasicClientUserAgent::onRequestRetry(ClientRegistrationHandle h, int retryMinimum, const SipMessage& msg)
 {
    mRegHandle = h;
+   if(mShuttingdown)
+   {
+       return -1;
+   }
 
    if(mRegistrationRetryDelayTime == 0)
    {

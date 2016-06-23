@@ -314,6 +314,7 @@
     <ClCompile Include="PoolBase.cxx" />
     <ClCompile Include="SelectInterruptor.cxx" />
     <ClCompile Include="ServerProcess.cxx" />
+    <ClCompile Include="Sha1.cxx" />
     <ClCompile Include="ssl\OpenSSLInit.cxx">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
@@ -405,6 +406,7 @@
     <ClInclude Include="ProducerFifoBuffer.hxx" />
     <ClInclude Include="SelectInterruptor.hxx" />
     <ClInclude Include="ServerProcess.hxx" />
+    <ClInclude Include="Sha1.hxx" />
     <ClInclude Include="ssl\OpenSSLInit.hxx" />
     <ClInclude Include="ParseBuffer.hxx" />
     <ClInclude Include="ParseException.hxx" />
@@ -412,6 +414,7 @@
     <ClInclude Include="dns\QueryTypes.hxx" />
     <ClInclude Include="Random.hxx" />
     <ClInclude Include="RecursiveMutex.hxx" />
+    <ClInclude Include="ResipAssert.h" />
     <ClInclude Include="resipfaststreams.hxx" />
     <ClInclude Include="dns\RRCache.hxx" />
     <ClInclude Include="dns\RRFactory.hxx" />
@@ -439,9 +442,6 @@
     <ClInclude Include="WinCompat.hxx" />
     <ClInclude Include="WinLeakCheck.hxx" />
     <ClInclude Include="XMLCursor.hxx" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="ReadMe.txt" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="dns\ares\ares_10_0.vcxproj">

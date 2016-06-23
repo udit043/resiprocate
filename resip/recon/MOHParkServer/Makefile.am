@@ -15,16 +15,13 @@ EXTRA_DIST += MOHParkServer.config
 EXTRA_DIST += music.wav
 
 LDADD = ../librecon.la
-LDADD += -lsipXsdp
-LDADD += -lsipXmediaProcessing
-LDADD += -lsipXmedia
-LDADD += -lsipXport
-LDADD += -lsipXtack
 LDADD += ../../../reflow/libreflow.la
 LDADD += ../../../reTurn/client/libreTurnClient.la
 LDADD += ../../../resip/dum/libdum.la
 LDADD += ../../../resip/stack/libresip.la
 LDADD += ../../../rutil/librutil.la
+LDADD += -lsipXport
+LDADD += $(LIBSSL_LIBADD) @LIBPTHREAD_LIBADD@
 
 sbin_PROGRAMS = MOHParkServer
 

@@ -1,5 +1,6 @@
 
 #include "resip/stack/Contents.hxx"
+#include "resip/dum/BaseCreator.hxx"
 #include "resip/dum/ClientInviteSession.hxx"
 #include "resip/dum/Dialog.hxx"
 #include "resip/dum/DialogEventStateManager.hxx"
@@ -31,9 +32,10 @@ ClientInviteSession::ClientInviteSession(DialogUsageManager& dum,
    InviteSession(dum, dialog),
    mStaleCallTimerSeq(1),
    mCancelledTimerSeq(1),
-   mServerSub(serverSub)
+   mServerSub(serverSub),
+   mAllowOfferInPrack(false)
 {
-   assert(request->isRequest());
+   resip_assert(request->isRequest());
    if(initialOffer)  
    {
       mProposedLocalOfferAnswer = auto_ptr<Contents>(initialOffer->clone());
@@ -64,22 +66,32 @@ ClientInviteSession::provideOffer(const Contents& offer, DialogUsageManager::Enc
    switch(mState)
    {
       case UAC_EarlyWithAnswer:
-      {
-         transition(UAC_SentUpdateEarly);
+         if(mAllowOfferInPrack)
+         {
+            // This flag is enabled when we are about to send our first PRACK.  We are
+            // allowed to send an offer in our first PRACK request, so don't use UPDATE in 
+            // this case.
+            //  Remember proposed local offferAnswer.
+            mProposedLocalOfferAnswer = InviteSession::makeOfferAnswer(offer, alternative);
+            mProposedEncryptionLevel = level;
+         }
+         else
+         {
+            transition(UAC_SentUpdateEarly);
 
-         //  Creates an UPDATE request with application supplied offer.
-         mDialog.makeRequest(*mLastLocalSessionModification, UPDATE);
-         InviteSession::setOfferAnswer(*mLastLocalSessionModification, offer);
+            //  Creates an UPDATE request with application supplied offer.
+            mDialog.makeRequest(*mLastLocalSessionModification, UPDATE);
+            InviteSession::setOfferAnswer(*mLastLocalSessionModification, offer);
 
-         //  Remember proposed local offferAnswer.
-         mProposedLocalOfferAnswer = InviteSession::makeOfferAnswer(offer, alternative);
-         mProposedEncryptionLevel = level;
+            //  Remember proposed local offferAnswer.
+            mProposedLocalOfferAnswer = InviteSession::makeOfferAnswer(offer, alternative);
+            mProposedEncryptionLevel = level;
 
-         //  Send the req and do state transition.
-         DumHelper::setOutgoingEncryptionLevel(*mLastLocalSessionModification, mProposedEncryptionLevel);
-         send(mLastLocalSessionModification);
+            //  Send the req and do state transition.
+            DumHelper::setOutgoingEncryptionLevel(*mLastLocalSessionModification, mProposedEncryptionLevel);
+            send(mLastLocalSessionModification);
+         }
          break;
-      }
 
       case UAC_SentAnswer:
          // just queue it for later
@@ -97,7 +109,8 @@ ClientInviteSession::provideOffer(const Contents& offer, DialogUsageManager::Enc
       case UAC_Cancelled:
       case UAC_QueuedUpdate:
       case Terminated:
-         assert(0);
+         WarningLog (<< "Incorrect state to provideOffer: " << toData(mState));
+         throw DialogUsage::Exception("Can't provide an offer", __FILE__,__LINE__);
          break;
 
       default:
@@ -127,8 +140,8 @@ ClientInviteSession::provideAnswer (const Contents& answer)
          mCurrentRemoteOfferAnswer = mProposedRemoteOfferAnswer;
          mCurrentLocalOfferAnswer = InviteSession::makeOfferAnswer(answer);
 
-         //  Creates an PRACK request with application supplied offer.
-         sendPrack(answer);
+         //  Creates a PRACK request with application supplied answer
+         sendPrack(answer, mCurrentEncryptionLevel);
          break;
       }
 
@@ -139,7 +152,6 @@ ClientInviteSession::provideAnswer (const Contents& answer)
 
          mCurrentRemoteOfferAnswer = mProposedRemoteOfferAnswer;
          mCurrentLocalOfferAnswer = InviteSession::makeOfferAnswer(answer);
-         // mLastSessionModification = ack;  // ?slg? is this needed?
          break;
       }
       case UAC_ReceivedUpdateEarly:
@@ -169,7 +181,8 @@ ClientInviteSession::provideAnswer (const Contents& answer)
       case UAC_Cancelled:
       case UAC_QueuedUpdate:
       case Terminated:
-         assert(0);
+         WarningLog (<< "Incorrect state to provideAnswer: " << toData(mState));
+         throw DialogUsage::Exception("Can't provide an answer", __FILE__,__LINE__);
          break;
 
       default:
@@ -220,7 +233,7 @@ ClientInviteSession::end(EndReason reason)
 
       case UAC_Start:
          WarningLog (<< "Try to end when in state=" << toData(mState));
-         assert(0);
+         resip_assert(0);
          break;
 
       case Terminated:
@@ -255,7 +268,8 @@ ClientInviteSession::reject (int statusCode, WarningCategory *warning)
          break;
       }
 
-      case UAC_Answered:{
+      case UAC_Answered:
+      {
          // We received an offer in a 2xx response, and we want to reject it
          // ACK with no body, then send bye
          sendAck();
@@ -273,7 +287,7 @@ ClientInviteSession::reject (int statusCode, WarningCategory *warning)
       case UAC_SentAnswer:
       case UAC_Cancelled:
          WarningLog (<< "Try to reject when in state=" << toData(mState));
-         assert(0);
+         resip_assert(0);
          break;
 
       default:
@@ -304,7 +318,7 @@ ClientInviteSession::cancel()
          break;
 
       default:
-         assert(0);
+         resip_assert(0);
          break;
    }
 }
@@ -344,7 +358,6 @@ ClientInviteSession::startStaleCallTimer()
 {
    InfoLog (<< toData(mState) << ": startStaleCallTimer");
    unsigned long when = mDialog.mDialogSet.getUserProfile()->getDefaultStaleCallTime();
-   when += Random::getRandom() % 120;
    
    mDum.addTimer(DumTimeout::StaleCall, 
                  when, 
@@ -405,7 +418,7 @@ ClientInviteSession::dispatch(const SipMessage& msg)
         }
      }
 
-     if (checkRseq(msg))
+     if (isBadRseq(msg))
      {
         return;
      }
@@ -529,15 +542,16 @@ ClientInviteSession::handleRedirect (const SipMessage& msg)
 void
 ClientInviteSession::handleProvisional(const SipMessage& msg)
 {
-   assert(msg.isResponse());
-   assert(msg.header(h_StatusLine).statusCode() < 200);
-   assert(msg.header(h_StatusLine).statusCode() > 100);
+   resip_assert(msg.isResponse());
+   resip_assert(msg.header(h_StatusLine).statusCode() < 200);
+   resip_assert(msg.header(h_StatusLine).statusCode() > 100);
 
    //.dcm. Kept the following checks here rather than discardMessage as the
    // state machine can be affected(termination).
 
    // !dcm! should we really end the InviteSession or should be discard the 1xx instead?
-   if (msg.header(h_CSeq).sequence() != mLastLocalSessionModification->header(h_CSeq).sequence())
+   // Check CSeq in 1xx against original INVITE request
+   if (msg.header(h_CSeq).sequence() != mDialog.mDialogSet.getCreator()->getLastRequest()->header(h_CSeq).sequence())
    {
       InfoLog (<< "Failure:  CSeq doesn't match invite: " << msg.brief());
       onFailureAspect(getHandle(), msg);
@@ -562,9 +576,9 @@ ClientInviteSession::handleProvisional(const SipMessage& msg)
 void
 ClientInviteSession::handleFinalResponse(const SipMessage& msg)
 {
-   assert(msg.isResponse());
-   assert(msg.header(h_StatusLine).statusCode() >= 200);
-   assert(msg.header(h_StatusLine).statusCode() < 300);
+   resip_assert(msg.isResponse());
+   resip_assert(msg.header(h_StatusLine).statusCode() >= 200);
+   resip_assert(msg.header(h_StatusLine).statusCode() < 300);
 
    handleSessionTimerResponse(msg);
    storePeerCapabilities(msg);
@@ -572,7 +586,7 @@ ClientInviteSession::handleFinalResponse(const SipMessage& msg)
 }
 
 void
-ClientInviteSession::handleOffer (const SipMessage& msg, const Contents& offer)
+ClientInviteSession::handle1xxOffer(const SipMessage& msg, const Contents& offer)
 {
    InviteSessionHandler* handler = mDum.mInviteSessionHandler;
 
@@ -583,7 +597,7 @@ ClientInviteSession::handleOffer (const SipMessage& msg, const Contents& offer)
 }
 
 void
-ClientInviteSession::handleAnswer(const SipMessage& msg, const Contents& answer)
+ClientInviteSession::handle1xxAnswer(const SipMessage& msg, const Contents& answer)
 {
    setCurrentLocalOfferAnswer(msg);
    mCurrentEncryptionLevel = getEncryptionLevel(msg);
@@ -591,18 +605,36 @@ ClientInviteSession::handleAnswer(const SipMessage& msg, const Contents& answer)
 
    InviteSessionHandler* handler = mDum.mInviteSessionHandler;
    handleProvisional(msg);
+
+   // flag to let handle1xxAnswer know that it is OK to send an offer in the 
+   // first PRACK (for a provisional with SDP answer) and to let providerOffer know 
+   // that the offer will be going in an PRACK and not in an update.  Flag is not 
+   // needed after handle1xxAnswer is called so it is reset.
+   mAllowOfferInPrack = true;  
+
    handler->onAnswer(getSessionHandle(), msg, answer);
 
-   sendPrackIfNeeded(msg);
+   // Reset flag - no longer needed
+   mAllowOfferInPrack = false;
+
+   // If offer is provided in onAnswer callback then send offer in PRACK
+   if(mProposedLocalOfferAnswer.get())
+   {
+      sendPrack(*mProposedLocalOfferAnswer.get(), mProposedEncryptionLevel);
+   }
+   else
+   {
+      sendPrackIfNeeded(msg);
+   }
 }
 
 // will not include SDP (this is a subsequent 1xx)
 void
 ClientInviteSession::sendPrackIfNeeded(const SipMessage& msg)
 {
-   assert(msg.isResponse());
-   assert(msg.header(h_StatusLine).statusCode() < 200);
-   assert(msg.header(h_StatusLine).statusCode() > 100);
+   resip_assert(msg.isResponse());
+   resip_assert(msg.header(h_StatusLine).statusCode() < 200);
+   resip_assert(msg.header(h_StatusLine).statusCode() > 100);
    
    if (isReliable(msg))
    {
@@ -613,11 +645,12 @@ ClientInviteSession::sendPrackIfNeeded(const SipMessage& msg)
    }
 }
 
-// This version is used to send an answer to the UAS in PRACK
-// from EarlyWithOffer state. Assumes that it is the first PRACK. Subsequent
-// PRACK will not have SDP
+// This version is used to send an answer to the UAS in PRACK from EarlyWithOffer 
+// state. Assumes that it is the first PRACK. Subsequent PRACK will not have SDP
+// Also used to send an offer in the first PRACK if the 18x included an
+// answer.
 void
-ClientInviteSession::sendPrack(const Contents& offerAnswer)
+ClientInviteSession::sendPrack(const Contents& offerAnswer, DialogUsageManager::EncryptionLevel encryptionLevel)
 {
    SharedPtr<SipMessage> prack(new SipMessage);
    mDialog.makeRequest(*prack, PRACK);
@@ -625,41 +658,16 @@ ClientInviteSession::sendPrack(const Contents& offerAnswer)
    
    InviteSession::setOfferAnswer(*prack, offerAnswer);
 
-   //  Remember last session modification.
-   // mLastSessionModification = prack; // ?slg? is this needed?
-
-   DumHelper::setOutgoingEncryptionLevel(*prack, mCurrentEncryptionLevel);
+   DumHelper::setOutgoingEncryptionLevel(*prack, encryptionLevel);
    send(prack);
 }
-
-
-/*
-bool
-ClientInviteSession::isNextProvisional(const SipMessage& msg)
-{
-}
-
-bool
-ClientInviteSession::isRetransmission(const SipMessage& msg)
-{
-   if ( mLastReceivedRSeq == 0 ||
-        msg.header(h_RSeq).value() <= mLastReceivedRSeq)
-   {
-      return false;
-   }
-   else
-   {
-      return true;
-   }
-}
-*/
 
 void
 ClientInviteSession::dispatchStart (const SipMessage& msg)
 {
-   assert(msg.isResponse());
-   assert(msg.header(h_StatusLine).statusCode() > 100);
-   assert(msg.header(h_CSeq).method() == INVITE);
+   resip_assert(msg.isResponse());
+   resip_assert(msg.header(h_StatusLine).statusCode() > 100);
+   resip_assert(msg.header(h_CSeq).method() == INVITE);
 
    InviteSessionHandler* handler = mDum.mInviteSessionHandler;
    std::auto_ptr<Contents> offerAnswer = InviteSession::getOfferAnswer(msg);
@@ -674,12 +682,12 @@ ClientInviteSession::dispatchStart (const SipMessage& msg)
          if(!isTerminated())  
          {
             handleProvisional(msg);
-            sendPrackIfNeeded(msg); //may wish to move emprty PRACK handling
-                                 //outside the state machine            
+            sendPrackIfNeeded(msg);  // may wish to move emprty PRACK handling
+                                     // outside the state machine            
          }
          break;
 
-      case On1xxEarly:
+      case On1xxEarly:  // only unreliable
          //!dcm! according to draft-ietf-sipping-offeranswer there can be a non
          // reliable 1xx followed by a reliable 1xx.  Also, the intial 1xx
          // doesn't have to have an offer. However, DUM will only generate
@@ -703,7 +711,7 @@ ClientInviteSession::dispatchStart (const SipMessage& msg)
          handler->onNewSession(getHandle(), InviteSession::Offer, msg);
          if(!isTerminated())  
          {
-            handleOffer(msg, *offerAnswer);
+            handle1xxOffer(msg, *offerAnswer);
          }
          break;
 
@@ -712,7 +720,7 @@ ClientInviteSession::dispatchStart (const SipMessage& msg)
          handler->onNewSession(getHandle(), InviteSession::Answer, msg);
          if(!isTerminated())  
          {
-            handleAnswer(msg, *offerAnswer);
+            handle1xxAnswer(msg, *offerAnswer);
          }
          break;
 
@@ -721,7 +729,7 @@ ClientInviteSession::dispatchStart (const SipMessage& msg)
          handleFinalResponse(msg);
          mProposedRemoteOfferAnswer = InviteSession::makeOfferAnswer(*offerAnswer);
          handler->onNewSession(getHandle(), InviteSession::Offer, msg);
-         assert(mProposedLocalOfferAnswer.get() == 0);
+         resip_assert(mProposedLocalOfferAnswer.get() == 0);
          mCurrentEncryptionLevel = getEncryptionLevel(msg);
          if(!isTerminated())  
          {
@@ -798,6 +806,7 @@ ClientInviteSession::dispatchEarly (const SipMessage& msg)
       case On1xx:
          transition(UAC_Early);
          handleProvisional(msg);
+         sendPrackIfNeeded(msg);
          break;
 
       case On1xxEarly: // only unreliable
@@ -812,19 +821,19 @@ ClientInviteSession::dispatchEarly (const SipMessage& msg)
 
       case On1xxOffer:
          transition(UAC_EarlyWithOffer);
-         handleOffer(msg, *offerAnswer);
+         handle1xxOffer(msg, *offerAnswer);
          break;
 
       case On1xxAnswer:
          transition(UAC_EarlyWithAnswer);
-         handleAnswer(msg, *offerAnswer);
+         handle1xxAnswer(msg, *offerAnswer);
          break;
 
       case On2xxOffer:
          transition(UAC_Answered);
          handleFinalResponse(msg);
 
-         assert(mProposedLocalOfferAnswer.get() == 0);
+         resip_assert(mProposedLocalOfferAnswer.get() == 0);
          mCurrentEncryptionLevel = getEncryptionLevel(msg);
          mProposedRemoteOfferAnswer = InviteSession::makeOfferAnswer(*offerAnswer);
 
@@ -904,6 +913,9 @@ ClientInviteSession::dispatchEarly (const SipMessage& msg)
          send(response);
          break;
       }
+     
+      case On200Prack:
+         break;
 
       default:
          // !kh!
@@ -1052,8 +1064,20 @@ ClientInviteSession::dispatchSentAnswer (const SipMessage& msg)
          onConnectedAspect(getHandle(), msg);
          break;
 
-      case On2xxAnswer:
       case On2xxOffer:
+         {
+             if (*offerAnswer == *mCurrentRemoteOfferAnswer)
+             {
+                 InfoLog (<< "Ignoring illegal offer identical with current remote offer/answer");
+                 transition(Connected);
+                 sendAck();
+                 handleFinalResponse(msg);
+                 onConnectedAspect(getHandle(), msg);
+                 break;
+             }
+         }
+         // fall through to next label
+      case On2xxAnswer:
       case On1xxAnswer:
       case On1xxOffer:
          sendAck();
@@ -1128,8 +1152,20 @@ ClientInviteSession::dispatchQueuedUpdate (const SipMessage& msg)
          onConnectedAspect(getHandle(), msg);
          break;
 
-      case On2xxAnswer:
       case On2xxOffer:
+         {
+             if (*offerAnswer == *mCurrentRemoteOfferAnswer)
+             {
+                 InfoLog (<< "Ignoring illegal offer identical with current remote offer/answer");
+                 transition(Connected);
+                 sendAck();
+                 handleFinalResponse(msg);
+                 onConnectedAspect(getHandle(), msg);
+                 break;
+             }
+         }
+         // fall through to next label
+      case On2xxAnswer:
       case On1xxAnswer:
       case On1xxOffer:
          sendAck();
@@ -1184,13 +1220,15 @@ ClientInviteSession::dispatchEarlyWithAnswer (const SipMessage& msg)
          handleProvisional(msg);
          sendPrackIfNeeded(msg);
          break;
+
       case On1xxOffer:
          if(!isTerminated())  
          {
             transition(UAC_EarlyWithOffer);
-            handleOffer(msg, *offerAnswer);
+            handle1xxOffer(msg, *offerAnswer);
          }
          break;
+
       case On2xx:
          transition(Connected);
          sendAck();
@@ -1198,8 +1236,20 @@ ClientInviteSession::dispatchEarlyWithAnswer (const SipMessage& msg)
          onConnectedAspect(getHandle(), msg);
          break;
 
-      case On2xxAnswer:
       case On2xxOffer:
+         {
+             if (*offerAnswer == *mCurrentRemoteOfferAnswer)
+             {
+                 InfoLog (<< "Ignoring illegal offer identical with current remote offer/answer");
+                 transition(Connected);
+                 sendAck();
+                 handleFinalResponse(msg);
+                 onConnectedAspect(getHandle(), msg);
+                 break;
+             }
+         }
+         // fall through to next label
+      case On2xxAnswer:
          sendAck();
          sendBye();
          InfoLog (<< "Failure:  illegal offer/answer: " << msg.brief());
@@ -1241,6 +1291,18 @@ ClientInviteSession::dispatchEarlyWithAnswer (const SipMessage& msg)
 
       case OnBye:
          dispatchBye(msg);
+         break;
+
+      case On200Prack:
+         // We may have sent a PRACK with an offer (if provideOffer was called from onAnswer 
+         // from the first reliable provisional) - if so this will have SDP we need to call onAnswer
+         if(offerAnswer.get() && mProposedLocalOfferAnswer.get())
+         {
+            setCurrentLocalOfferAnswer(msg);
+            mCurrentEncryptionLevel = getEncryptionLevel(msg);
+            mCurrentRemoteOfferAnswer = InviteSession::makeOfferAnswer(*offerAnswer);
+            handler->onAnswer(getSessionHandle(), msg, *offerAnswer);
+         }
          break;
 
       default:
@@ -1309,6 +1371,9 @@ ClientInviteSession::dispatchSentUpdateEarly (const SipMessage& msg)
          mDum.destroy(this);
          break;
 
+      case On200Prack:
+         break;
+
       default:
          WarningLog (<< "Don't know what this is : " << msg);
          break;
@@ -1357,21 +1422,28 @@ ClientInviteSession::dispatchSentUpdateEarlyGlare (const SipMessage& msg)
 }
 
 void
-ClientInviteSession::dispatchReceivedUpdateEarly (const SipMessage& msg)
+ClientInviteSession::dispatchReceivedUpdateEarly(const SipMessage& msg)
 {
-   /*
-   InviteSessionHandler* handler = mDum.mInviteSessionHandler;
    std::auto_ptr<Contents> offerAnswer = InviteSession::getOfferAnswer(msg);
 
    switch (toEvent(msg, offerAnswer.get()))
    {
+      case OnUpdate:
+      case OnUpdateOffer:
+         // If we receive an UPDATE before we have generated a final response to a previous UPDATE on the 
+         // same dialog, then we MUST return a 500 response with a Retry-After header (random duration 0-10 seconds)
+         {
+            SharedPtr<SipMessage> u500(new SipMessage);
+            mDialog.makeResponse(*u500, msg, 500);
+            u500->header(h_RetryAfter).value() = Random::getRandom() % 10;
+            send(u500);
+         }
+         break;
+
       default:
-         // !kh!
-         // should not assert here for peer sent us garbage.
          WarningLog (<< "Don't know what this is : " << msg);
          break;
    }
-   */
    WarningLog (<< "Ignoring message received in ReceivedUpdateEarly: " << msg);
 }
 
@@ -1419,7 +1491,7 @@ ClientInviteSession::dispatchCancelled (const SipMessage& msg)
 
 //true if 180rel should be ignored. Saves rseq as a side effect.
 bool 
-ClientInviteSession::checkRseq(const SipMessage& msg)
+ClientInviteSession::isBadRseq(const SipMessage& msg)
 {
    int code = msg.isResponse() ? msg.header(h_StatusLine).statusCode() : 0;
    if (msg.method() == INVITE && code > 100 && code < 200)

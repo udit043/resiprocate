@@ -4,15 +4,19 @@
 #include "rutil/Data.hxx"
 #include "rutil/ServerProcess.hxx"
 #include "resip/dum/TlsPeerAuthManager.hxx"
+#include "resip/stack/StatisticsHandler.hxx"
 #include <memory>
 
-#include <memory>
+#include "repro/AuthenticatorFactory.hxx"
+#include "repro/Plugin.hxx"
+
 
 namespace resip
 {
    class TransactionUser;
    class SipStack;
    class RegistrationPersistenceManager;
+   class PublicationPersistenceManager;
    class FdPollGrp;
    class AsyncProcessHandler;
    class ThreadIf;
@@ -38,8 +42,11 @@ class RegSyncServerThread;
 class CommandServer;
 class CommandServerThread;
 class Processor;
+class PresenceServer;
 
-class ReproRunner : public resip::ServerProcess
+class ReproRunner : public resip::ServerProcess,
+                    public resip::ExternalStatsHandler
+
 {
 public:
    ReproRunner();
@@ -48,17 +55,24 @@ public:
    virtual bool run(int argc, char** argv);
    virtual void shutdown();
    virtual void restart();  // brings everydown and then backup again - leaves InMemoryRegistrationDb intact
+   virtual void onHUP();
 
    virtual Proxy* getProxy() { return mProxy; }
+
+   // External Stats handler
+   virtual bool operator()(resip::StatisticsMessage &statsMessage);
 
 protected:
    virtual void cleanupObjects();
 
+   virtual bool loadPlugins();
+   virtual void setOpenSSLCTXOptionsFromConfig(const resip::Data& configVar, long& opts);
    virtual bool createSipStack();
    virtual bool createDatastore();
    virtual bool createProxy();
    virtual void populateRegistrations();
    virtual bool createWebAdmin();
+   virtual void createAuthenticatorFactory();
    virtual void createDialogUsageManager();
    virtual void createRegSync();
    virtual void createCommandServer();
@@ -71,15 +85,12 @@ protected:
    virtual void makeResponseProcessorChain(repro::ProcessorChain& chain);
    virtual void makeTargetProcessorChain(repro::ProcessorChain& chain);
 
-   virtual void loadCommonNameMappings();
-
    bool mRunning;
    bool mRestarting;
    int mArgc;
    char** mArgv;
    bool mThreadedStack;
    resip::Data mHttpRealm;
-   bool mSipAuthDisabled;
    bool mUseV4;
    bool mUseV6;
    int mRegSyncPort;
@@ -91,15 +102,17 @@ protected:
    AbstractDb* mAbstractDb;
    AbstractDb* mRuntimeAbstractDb;
    resip::RegistrationPersistenceManager* mRegistrationPersistenceManager;
-   Dispatcher* mAuthRequestDispatcher;
+   resip::PublicationPersistenceManager* mPublicationPersistenceManager;
+   AuthenticatorFactory* mAuthFactory;
    Dispatcher* mAsyncProcessorDispatcher;
    ProcessorChain* mMonkeys;
    ProcessorChain* mLemurs;
    ProcessorChain* mBaboons;
    Proxy* mProxy;
-   WebAdmin* mWebAdmin;
+   std::list<WebAdmin*> mWebAdminList;
    WebAdminThread* mWebAdminThread;
    Registrar* mRegistrar;
+   PresenceServer* mPresenceServer;
    resip::DialogUsageManager* mDum;
    resip::ThreadIf* mDumThread;
    CertServer* mCertServer;
@@ -107,11 +120,12 @@ protected:
    RegSyncServer* mRegSyncServerV4;
    RegSyncServer* mRegSyncServerV6;
    RegSyncServerThread* mRegSyncServerThread;
-   CommandServer* mCommandServerV4;
-   CommandServer* mCommandServerV6;
+   std::list<CommandServer*> mCommandServerList;
    CommandServerThread* mCommandServerThread;
    resip::CongestionManager* mCongestionManager;
-   resip::CommonNameMappings mCommonNameMappings;
+   std::vector<Plugin*> mPlugins;
+   typedef std::map<unsigned int, resip::NameAddr> TransportRecordRouteMap;
+   TransportRecordRouteMap mStartupTransportRecordRoutes;
 };
 
 }

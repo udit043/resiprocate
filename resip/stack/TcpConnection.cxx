@@ -6,14 +6,15 @@
 #include "rutil/Socket.hxx"
 #include "resip/stack/TcpConnection.hxx"
 #include "resip/stack/Tuple.hxx"
+#include "rutil/Errdes.hxx"
 
 using namespace resip;
 
 #define RESIPROCATE_SUBSYSTEM Subsystem::TRANSPORT
 
 TcpConnection::TcpConnection(Transport* transport,const Tuple& who, Socket fd,
-                             Compression &compression) 
-  : Connection(transport,who, fd, compression)
+                             Compression &compression, bool isServer)
+  : Connection(transport,who, fd, compression, isServer)
 {
    DebugLog (<< "Creating TCP connection " << who << " on " << fd);
 }
@@ -21,8 +22,8 @@ TcpConnection::TcpConnection(Transport* transport,const Tuple& who, Socket fd,
 int 
 TcpConnection::read( char* buf, int count )
 {
-   assert(buf);
-   assert(count > 0);
+   resip_assert(buf);
+   resip_assert(count > 0);
    
 #if defined(WIN32)
    int bytesRead = ::recv(getSocket(), buf, count, 0);
@@ -36,8 +37,8 @@ TcpConnection::read( char* buf, int count )
       switch (e)
       {
          case EAGAIN:
-#ifdef WIN32 //EWOULDBLOCK is not returned from recv on *nix/*bsd
-         case EWOULDBLOCK:  
+#if EAGAIN != EWOULDBLOCK
+         case EWOULDBLOCK:  // Treat EGAIN and EWOULDBLOCK as the same: http://stackoverflow.com/questions/7003234/which-systems-define-eagain-and-ewouldblock-as-different-values
 #endif
             StackLog (<< "No data ready to read");
             return 0;
@@ -58,11 +59,11 @@ TcpConnection::read( char* buf, int count )
             ErrLog (<< "buf is outside your accessible address space.");
             break;
          default:
-            ErrLog (<< "Some other error, code = " << e);
+            ErrLog (<< "Some other error, code = " << e << " error message : " << errortostringOS(e) );
             break;
       }
 
-      InfoLog (<< "Failed read on " << getSocket() << " " << strerror(e));
+      InfoLog (<< "Failed read on " << getSocket() << " " << errortostringOS(e));
       Transport::error(e);
       setFailureReason(TransportFailure::ConnectionException, e+2000);
       return -1;
@@ -82,8 +83,8 @@ TcpConnection::write( const char* buf, const int count )
 {
    //DebugLog (<< "Writing " << buf);   // Note:  this can end up writing garbage to the logs following the message for non-null terminated buffers
 
-   assert(buf);
-   assert(count > 0);
+   resip_assert(buf);
+   resip_assert(count > 0);
 
 #if defined(WIN32)
    int bytesWritten = ::send(getSocket(), buf, count, 0);
@@ -94,9 +95,14 @@ TcpConnection::write( const char* buf, const int count )
    if (bytesWritten == INVALID_SOCKET)
    {
       int e = getErrno();
-      InfoLog (<< "Failed write on " << getSocket() << " " << strerror(e));
-      Transport::error(e);
       //setFailureReason(TransportFailure::ConnectionException, e+1000);
+      if (e == EAGAIN || e == EWOULDBLOCK) // Treat EGAIN and EWOULDBLOCK as the same: http://stackoverflow.com/questions/7003234/which-systems-define-eagain-and-ewouldblock-as-different-values
+      {
+          // TCP buffers are backed up - we couldn't write anything - but we shouldn't treat this an error - return we wrote 0 bytes
+          return 0;
+      }
+      InfoLog (<< "Failed write on " << getSocket() << " " << errortostringOS(e));
+      Transport::error(e);
       return -1;
    }
    

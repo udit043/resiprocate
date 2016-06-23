@@ -10,9 +10,10 @@ SUBDIRS += . test
 
 EXTRA_DIST = fixupGperf
 EXTRA_DIST += mainpage.doc
-EXTRA_DIST += rutil_10_0.vcxproj rutil_10_0.vcxproj.filters
+EXTRA_DIST += *.vcxproj *.vcxproj.filters
 EXTRA_DIST += *.vcproj
 EXTRA_DIST += WinCompat.cxx
+EXTRA_DIST += msvc/*.h
 EXTRA_DIST += dns/LocalDns.cxx
 
 #AM_CXXFLAGS = -I../contrib/ares -DUSE_ARES
@@ -26,11 +27,15 @@ lib_LTLIBRARIES = librutil.la
 librutil_la_LIBADD = $(LIBSSL_LIBADD)
 librutil_la_LIBADD += $(LIBRADIUS_LIBADD)
 librutil_la_LIBADD += $(LIBARES_LIBADD)
+librutil_la_LIBADD += @LIBSTL_LIBADD@
+librutil_la_LIBADD += @LIBLOG_LIBADD@
 #librutil_la_LIBADD += -lrt
+librutil_la_LIBADD += @LIBPTHREAD_LIBADD@
 librutil_la_LDFLAGS = @LIBTOOL_VERSION_RELEASE@ -export-dynamic
 
 librutil_la_SOURCES = \
 	AbstractFifo.cxx \
+	AndroidLogger.cxx \
 	BaseException.cxx \
 	Coders.cxx \
 	Condition.cxx \
@@ -48,6 +53,7 @@ librutil_la_SOURCES = \
 	Log.cxx \
 	MD5Stream.cxx \
 	Mutex.cxx \
+	NetNs.cxx \
 	ParseBuffer.cxx \
 	ParseException.cxx \
 	Poll.cxx \
@@ -59,6 +65,7 @@ librutil_la_SOURCES = \
 	RecursiveMutex.cxx \
 	resipfaststreams.cxx \
 	SelectInterruptor.cxx \
+	Sha1.cxx \
 	Socket.cxx \
 	Subsystem.cxx \
 	SysLogBuf.cxx \
@@ -98,6 +105,7 @@ endif
 
 rutilincludedir = $(includedir)/rutil
 nobase_rutilinclude_HEADERS = compat.hxx \
+	ResipAssert.h \
 	FileSystem.hxx \
 	HashMap.hxx \
 	wince/WceCompat.hxx \
@@ -131,6 +139,7 @@ nobase_rutilinclude_HEADERS = compat.hxx \
 	TransportType.hxx \
 	resipfaststreams.hxx \
 	Coders.hxx \
+	Sha1.hxx \
 	SharedPtr.hxx \
 	SelectInterruptor.hxx \
 	Socket.hxx \
@@ -161,6 +170,7 @@ nobase_rutilinclude_HEADERS = compat.hxx \
 	Lock.hxx \
 	TimeLimitFifo.hxx \
 	Mutex.hxx \
+	NetNs.hxx \
 	GenericTimerQueue.hxx \
 	IntrusiveListElement.hxx \
 	ssl/SHA1Stream.hxx \
@@ -179,6 +189,7 @@ nobase_rutilinclude_HEADERS = compat.hxx \
 	DataStream.hxx \
 	GenericIPAddress.hxx \
 	AbstractFifo.hxx \
+	AndroidLogger.hxx \
 	ParseException.hxx \
 	BaseException.hxx \
 	DataException.hxx \
@@ -186,14 +197,7 @@ nobase_rutilinclude_HEADERS = compat.hxx \
 	StlPoolAllocator.hxx \
 	ProducerFifoBuffer.hxx \
 	DinkyPool.hxx \
-	ConsumerFifoBuffer.hxx \
-	cajun/json/elements.h \
-	cajun/json/elements.inl \
-	cajun/json/reader.h \
-	cajun/json/reader.inl \
-	cajun/json/visitor.h \
-	cajun/json/writer.h \
-	cajun/json/writer.inl
+	ConsumerFifoBuffer.hxx
 
 
 ##############################################################################

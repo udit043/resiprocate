@@ -49,6 +49,7 @@
 #endif
 
 #include "rutil/WinLeakCheck.hxx"
+#include "rutil/Errdes.hxx"
 
 #include <openssl/e_os2.h>
 #include <openssl/evp.h>
@@ -80,13 +81,20 @@ DtlsTransport::DtlsTransport(Fifo<TransactionMessage>& fifo,
                              Security& security,
                              const Data& sipDomain,
                              AfterSocketCreationFuncPtr socketFunc,
-                             Compression& compression)
- : UdpTransport( fifo, portNum, version,
-   StunDisabled, interfaceObj, socketFunc, compression ),
+                             Compression& compression,
+                             const Data& certificateFilename, 
+                             const Data& privateKeyFilename,
+                             const Data& privateKeyPassPhrase)
+ : UdpTransport( fifo, portNum, version, StunDisabled, interfaceObj, socketFunc, compression ),
    mTimer( mHandshakePending ),
    mSecurity( &security ),
    mDomain(sipDomain)
 {
+   // Note on AfterSocketCreateFuncPtr:  because this class uses UdpTransport the bind operation 
+   //   is called in the UdpTransport constructor and the transport type passed to AfterSocketCreationFuncPtr
+   //   will end up being UDP and not DTLS.  TODO - this should be fixed.  Creating a UdpBaseTransport is one
+   //   solution that would align with the TCP flavour of transports.
+   
    setTlsDomain(sipDomain);
    InfoLog ( << "Creating DTLS transport host=" << interfaceObj
              << " port=" << mTuple.getPort()
@@ -94,15 +102,15 @@ DtlsTransport::DtlsTransport(Fifo<TransactionMessage>& fifo,
 
    mTxFifo.setDescription("DtlsTransport::mTxFifo");
 
-   mTuple.setType( transport() );
+   mTuple.setType( DTLS );
 
-   mClientCtx = mSecurity->createDomainCtx(DTLSv1_client_method(), Data::Empty) ;
-   mServerCtx = mSecurity->createDomainCtx(DTLSv1_server_method(), sipDomain) ;
-   assert( mClientCtx ) ;
-   assert( mServerCtx ) ;
+   mClientCtx = mSecurity->createDomainCtx(DTLSv1_client_method(), Data::Empty, certificateFilename, privateKeyFilename, privateKeyPassPhrase) ;
+   mServerCtx = mSecurity->createDomainCtx(DTLSv1_server_method(), sipDomain, certificateFilename, privateKeyFilename, privateKeyPassPhrase) ;
+   resip_assert( mClientCtx ) ;
+   resip_assert( mServerCtx ) ;
 
    mDummyBio = BIO_new( BIO_s_mem() ) ;
-   assert( mDummyBio ) ;
+   resip_assert( mDummyBio ) ;
 
    mSendData = NULL ;
 
@@ -161,7 +169,7 @@ DtlsTransport::_read( FdSet& fdset )
    if ( len == SOCKET_ERROR )
    {
       int err = getErrno() ;
-      if ( err != EWOULDBLOCK  )
+      if ( err != EAGAIN && err != EWOULDBLOCK ) // Treat EGAIN and EWOULDBLOCK as the same: http://stackoverflow.com/questions/7003234/which-systems-define-eagain-and-ewouldblock-as-different-values
       {
          error( err ) ;
       }
@@ -170,14 +178,15 @@ DtlsTransport::_read( FdSet& fdset )
    if (len == 0 || len == SOCKET_ERROR)
    {
       delete [] buffer ;
-      buffer = 0 ;
+      delete [] pt;
       return ;
    }
 
    if ( len + 1 >= UdpTransport::MaxBufferSize )
    {
       InfoLog (<<"Datagram exceeded max length "<<UdpTransport::MaxBufferSize ) ;
-      delete [] buffer ; buffer = 0 ;
+      delete [] buffer ; 
+      delete [] pt;
       return ;
    }
 
@@ -196,7 +205,7 @@ DtlsTransport::_read( FdSet& fdset )
    if ( ssl == NULL )
    {
       ssl = SSL_new( mServerCtx ) ;
-      assert( ssl ) ;
+      resip_assert( ssl ) ;
 
       // clear SSL_VERIFY_PEER|SSL_VERIFY_CLIENT_ONCE set in SSL_CTX if we are a server
       SSL_set_verify(ssl, 0, 0);
@@ -206,7 +215,7 @@ DtlsTransport::_read( FdSet& fdset )
       SSL_set_accept_state( ssl ) ;
 
       wbio = BIO_new_dgram( (int)mFd, BIO_NOCLOSE ) ;
-      assert( wbio ) ;
+      resip_assert( wbio ) ;
 
       BIO_dgram_set_peer( wbio, &peer ) ;
 
@@ -237,7 +246,10 @@ DtlsTransport::_read( FdSet& fdset )
       switch( err )
       {
          case SSL_ERROR_NONE:
-            break ;
+            {
+               DebugLog( << errortostringSSL(err) );
+               break ;
+            }
          case SSL_ERROR_SSL:
             {
                ERR_error_string_n(ERR_get_error(), errorString, sizeof(errorString));
@@ -248,9 +260,15 @@ DtlsTransport::_read( FdSet& fdset )
             }
             break ;
          case SSL_ERROR_WANT_READ:
-            break ;
+            {
+               DebugLog( << errortostringSSL(err) );
+               break ;
+            }
          case SSL_ERROR_WANT_WRITE:
-            break ;
+            {
+               DebugLog( << errortostringSSL(err) );
+               break ;
+            }
          case SSL_ERROR_SYSCALL:
             {
                ERR_error_string_n(ERR_get_error(), errorString, sizeof(errorString));
@@ -273,19 +291,29 @@ DtlsTransport::_read( FdSet& fdset )
             }
             break ;
          case SSL_ERROR_WANT_CONNECT:
-            break ;
+            {
+               DebugLog( << errortostringSSL(err) );
+               break ;
+            }
          case SSL_ERROR_WANT_ACCEPT:
-            break ;
+            {
+               DebugLog( << errortostringSSL(err) );
+               break ;
+            }
          default:
             break ;
       }
    }
 
    if ( len <= 0 )
+   {
        return ;
+   }
 
    if ( SSL_in_init( ssl ) )
+   {
       mTimer.add( ssl, DtlsReceiveTimeout ) ;
+   }
 
 #ifdef USE_SIGCOMP
    osc::StateChanges *sc = 0;
@@ -330,7 +358,7 @@ DtlsTransport::_read( FdSet& fdset )
 #endif
    }
 
-   SipMessage* message = new SipMessage(this);
+   SipMessage* message = new SipMessage(&mTuple);
 
    // set the received from information into the received= parameter in the
    // via
@@ -339,7 +367,6 @@ DtlsTransport::_read( FdSet& fdset )
    // each one is a unique SIP message
 
    // Save all the info where this message came from
-   tuple.transport = this ;
    message->setSource( tuple ) ;
    //DebugLog (<< "Received from: " << tuple);
 
@@ -424,7 +451,7 @@ DtlsTransport::_read( FdSet& fdset )
       }
 #endif
 
-   mStateMachineFifo.add( message ) ;
+   pushRxMsgUp(message);
 }
 
 void DtlsTransport::_write( FdSet& fdset )
@@ -442,8 +469,8 @@ void DtlsTransport::_write( FdSet& fdset )
    //DebugLog (<< "Sent: " <<  sendData->data);
    //DebugLog (<< "Sending message on udp.");
 
-   assert( &(*sendData) );
-   assert( sendData->destination.getPort() != 0 );
+   resip_assert( &(*sendData) );
+   resip_assert( sendData->destination.getPort() != 0 );
 
    sockaddr peer = sendData->destination.getSockaddr();
 
@@ -453,7 +480,7 @@ void DtlsTransport::_write( FdSet& fdset )
    if ( ssl == NULL )
    {
       ssl = SSL_new( mClientCtx ) ;
-      assert( ssl ) ;
+      resip_assert( ssl ) ;
 
 
       InfoLog( << "DTLS handshake starting (client mode)" );
@@ -461,7 +488,7 @@ void DtlsTransport::_write( FdSet& fdset )
       SSL_set_connect_state( ssl ) ;
 
       wBio = BIO_new_dgram( (int)mFd, BIO_NOCLOSE ) ;
-      assert( wBio ) ;
+      resip_assert( wBio ) ;
 
       BIO_dgram_set_peer( wBio, &peer) ;
 
@@ -524,7 +551,10 @@ void DtlsTransport::_write( FdSet& fdset )
       switch( err )
       {
          case SSL_ERROR_NONE:
-            break;
+            {
+               DebugLog( << errortostringSSL(err) );
+               break ;
+            }
          case SSL_ERROR_SSL:
             {
                ERR_error_string_n(ERR_get_error(), errorString, sizeof(errorString));
@@ -534,12 +564,18 @@ void DtlsTransport::_write( FdSet& fdset )
             }
             break;
          case SSL_ERROR_WANT_READ:
-            retry = 1 ;
-            break;
+            {
+               retry = 1 ;
+               DebugLog( << errortostringSSL(err) );
+               break ;
+            }
          case SSL_ERROR_WANT_WRITE:
-             retry = 1 ;
-             fdset.setWrite(mFd);
-            break;
+            {
+               retry = 1 ;
+               fdset.setWrite(mFd);
+               DebugLog( << errortostringSSL(err) );
+               break;
+            }
          case SSL_ERROR_SYSCALL:
             {
                int e = getErrno();
@@ -565,9 +601,15 @@ void DtlsTransport::_write( FdSet& fdset )
             }
             break ;
          case SSL_ERROR_WANT_CONNECT:
-            break;
+            {
+               DebugLog( << errortostringSSL(err) );
+               break ;
+            }
          case SSL_ERROR_WANT_ACCEPT:
-            break;
+            {
+               DebugLog( << errortostringSSL(err) );
+               break ;
+            }
          default:
             break ;
       }
@@ -609,7 +651,10 @@ DtlsTransport::_doHandshake( void )
       switch (err)
       {
          case SSL_ERROR_NONE:
-            break;
+            {
+               DebugLog( << errortostringSSL(err) );
+               break ;
+            }
          case SSL_ERROR_SSL:
             {
                ERR_error_string_n(ERR_get_error(), errorString, sizeof(errorString));
@@ -618,9 +663,15 @@ DtlsTransport::_doHandshake( void )
             }
             break;
          case SSL_ERROR_WANT_READ:
-            break;
+            {
+               DebugLog( << errortostringSSL(err) );
+               break ;
+            }
          case SSL_ERROR_WANT_WRITE:
-            break;
+            {
+               DebugLog( << errortostringSSL(err) );
+               break ;
+            }
          case SSL_ERROR_SYSCALL:
             {
                ERR_error_string_n(ERR_get_error(), errorString, sizeof(errorString));
@@ -636,9 +687,15 @@ DtlsTransport::_doHandshake( void )
             }
             break;
          case SSL_ERROR_WANT_CONNECT:
-            break;
+            {
+               DebugLog( << errortostringSSL(err) );
+               break ;
+            }
          case SSL_ERROR_WANT_ACCEPT:
-            break;
+            {
+               DebugLog( << errortostringSSL(err) );
+               break ;
+            }
          default:
             break ;
       }
@@ -695,7 +752,7 @@ void
 DtlsTransport::_mapDebug( const char *where, const char *action, SSL *ssl )
 {
    fprintf( stderr, "%s: %s\t%p\n", where, action, ssl ) ;
-   fprintf( stderr, "map sizet = %d\n", mDtlsConnections.size() ) ;
+   fprintf( stderr, "map sizet = %d\n", (unsigned int)mDtlsConnections.size() ) ;
 }
 
 void

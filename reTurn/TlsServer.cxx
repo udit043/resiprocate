@@ -1,5 +1,12 @@
+#if defined(HAVE_CONFIG_H)
+#include "config.h"
+#endif
+
+#ifdef USE_SSL
+
 #include "TlsServer.hxx"
 #include <boost/bind.hpp>
+#include <rutil/Data.hxx>
 #include <rutil/WinLeakCheck.hxx>
 #include <rutil/Logger.hxx>
 #include "ReTurnSubsystem.hxx"
@@ -32,10 +39,15 @@ TlsServer::TlsServer(asio::io_service& ioService, RequestHandler& requestHandler
    }
 
    // Use a private key from a file.
-   mContext.use_private_key_file(mRequestHandler.getConfig().mTlsServerCertificateFilename.c_str(), asio::ssl::context::pem, ec);
+   resip::Data keyFilename = mRequestHandler.getConfig().mTlsServerPrivateKeyFilename;
+   if(keyFilename.empty())
+   {
+      keyFilename = mRequestHandler.getConfig().mTlsServerCertificateFilename;
+   }
+   mContext.use_private_key_file(keyFilename.c_str(), asio::ssl::context::pem, ec);
    if(ec)
    {
-      ErrLog(<< "Unable to load server private key file: " << mRequestHandler.getConfig().mTlsServerCertificateFilename << ", error=" << ec.value() << "(" << ec.message() << ")");
+      ErrLog(<< "Unable to load server private key file: " << keyFilename << ", error=" << ec.value() << "(" << ec.message() << ")");
       throw asio::system_error(ec);
    }
 
@@ -52,6 +64,15 @@ TlsServer::TlsServer(asio::io_service& ioService, RequestHandler& requestHandler
 
    mAcceptor.open(endpoint.protocol());
    mAcceptor.set_option(asio::ip::tcp::acceptor::reuse_address(true));
+#ifdef USE_IPV6
+#ifdef __linux__
+   if(address.is_v6())
+   {
+      asio::ip::v6_only v6_opt(true);
+      mAcceptor.set_option(v6_opt);
+   }
+#endif
+#endif
    mAcceptor.bind(endpoint);
    mAcceptor.listen();
 
@@ -94,6 +115,8 @@ TlsServer::handleAccept(const asio::error_code& e)
 }
 
 }
+
+#endif
 
 /* ====================================================================
 

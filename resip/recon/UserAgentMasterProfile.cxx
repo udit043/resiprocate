@@ -18,7 +18,11 @@ UserAgentMasterProfile::UserAgentMasterProfile()
 #ifdef WIN32
    mCertPath = ".";
 #else
-   mCertPath = getenv("HOME");
+   const char* home_dir = getenv("HOME");
+   if(home_dir)
+   {
+      mCertPath = home_dir;
+   }
    mCertPath += "/.sipCerts/";
 #endif
 }
@@ -83,6 +87,30 @@ const Data
 UserAgentMasterProfile::certPath() const
 {
    return mCertPath;
+}
+
+std::vector<Data>&
+UserAgentMasterProfile::rootCertDirectories()
+{
+   return mRootCertDirectories;
+}
+
+const std::vector<Data>&
+UserAgentMasterProfile::rootCertDirectories() const
+{
+   return mRootCertDirectories;
+}
+
+std::vector<Data>&
+UserAgentMasterProfile::rootCertBundles()
+{
+   return mRootCertBundles;
+}
+
+const std::vector<Data>&
+UserAgentMasterProfile::rootCertBundles() const
+{
+   return mRootCertBundles;
 }
 
 bool& 

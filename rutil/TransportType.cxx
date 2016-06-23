@@ -65,14 +65,14 @@ getTransportNameFromTypeLower(const TransportType typeEnum)
 const resip::Data& 
 toData(const TransportType typeEnum)
 {
-   assert(typeEnum >= UNKNOWN_TRANSPORT && typeEnum < MAX_TRANSPORT);
+   resip_assert(typeEnum >= UNKNOWN_TRANSPORT && typeEnum < MAX_TRANSPORT);
    return transportNames[typeEnum];
 }
 
 const resip::Data& 
 toDataLower(const TransportType typeEnum)
 {
-   assert(typeEnum >= UNKNOWN_TRANSPORT && typeEnum < MAX_TRANSPORT);
+   resip_assert(typeEnum >= UNKNOWN_TRANSPORT && typeEnum < MAX_TRANSPORT);
    return transportNamesLower[typeEnum];
 }
 
@@ -102,11 +102,26 @@ isSecure(TransportType type)
    {
       case TLS:
       case DTLS:
+      case WSS:
          return true;
       case UDP:
       case TCP:
       case DCCP:
       case SCTP:
+      case WS:
+      default:
+         return false;
+   }
+}
+
+bool
+isWebSocket(TransportType type)
+{
+   switch(type)
+   {
+      case WS:
+      case WSS:
+         return true;
       default:
          return false;
    }

@@ -61,6 +61,9 @@ extern "C" {
 #endif
 
 #include <sys/types.h>
+#if defined(__ANDROID__)
+#include <sys/select.h>
+#endif
 #ifndef WIN32
 /* why was this commented out?! ah, it was a 'fix for windows' */
 #include <netinet/in.h>
@@ -125,7 +128,7 @@ typedef enum ares_poll_action {
 } ares_poll_action_t;
 struct ares_channeldata;
 typedef void (ares_poll_cb_func)(void *cb_data, struct ares_channeldata* chan, int sockidx,
-  int fd, ares_poll_action_t act);
+  int fd, int using_tcp, ares_poll_action_t act);
 
 #if defined(WIN32) || defined(sun)
 typedef unsigned char u_int8_t;
@@ -216,7 +219,7 @@ extern 	const char *ares_strerror(int code);
 extern 	void ares_free_errmem(char *mem);
 
 
-#if defined(WIN32) || defined (__CYGWIN__)
+#if defined(WIN32) || defined (__CYGWIN__) || defined (__ANDROID__)
 
 #define T_A             1               /* host address */
 #define T_NS            2               /* authoritative server */

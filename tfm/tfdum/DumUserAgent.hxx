@@ -1,6 +1,7 @@
 #if !defined(DumUserAgent_hxx)
 #define DumUserAgent_hxx
 
+#include "resip/stack/EventStackThread.hxx"
 #include "resip/dum/DialogEventHandler.hxx"
 #include "resip/dum/MasterProfile.hxx"
 #include "resip/dum/RegistrationHandler.hxx"
@@ -90,7 +91,6 @@ class DumUserAgent : public EndPoint,
       const resip::Data& getInstanceId() const;
       resip::Uri getContact() const;
 
-      
       static resip::SharedPtr<resip::MasterProfile> makeProfile(const resip::Uri& aor, const resip::Data& password);
 
       resip::SharedPtr<resip::MasterProfile> getProfile() const 
@@ -98,7 +98,11 @@ class DumUserAgent : public EndPoint,
          return mProfile;
       }
 
-      const resip::NameAddr& getAor() const;      
+      const resip::NameAddr& getAor() const;
+
+      // special handling required for UAC Prack scenario - must call provideOffer from 
+      // onAnswer callback in order to get Offer to be provided in first PRACK
+      ExpectAction* setOfferToProvideInNextOnAnswerCallback(boost::shared_ptr<resip::SdpContents> offer);
 
 //      DumUaAction* start();
       DumUaAction* shutdownUa();
@@ -478,7 +482,7 @@ class DumUserAgent : public EndPoint,
       //resip::ClientOutOfDialogReqHandle mClientOutOfDialogReq;
       //resip::ServerOutOfDialogReqHandle mServerOutOfDialogReq;
 
-      resip::DialogUsageManager& getDum() { return mDum; }
+      resip::DialogUsageManager& getDum() { return *mDum; }
       const resip::Data& getIp() const { return mIp; }
       int getPort() const { return mPort; }
 
@@ -531,6 +535,7 @@ class DumUserAgent : public EndPoint,
       virtual void onIllegalNegotiation(resip::InviteSessionHandle, const resip::SipMessage& msg);
       virtual void onSessionExpired(resip::InviteSessionHandle);
       virtual void onReferNoSub(resip::InviteSessionHandle, const resip::SipMessage& msg);
+      virtual void onPrack(resip::ServerInviteSessionHandle, const resip::SipMessage &msg);
 
       // ClientPublicationHandler
       virtual void onSuccess(resip::ClientPublicationHandle, const resip::SipMessage&);
@@ -587,8 +592,12 @@ class DumUserAgent : public EndPoint,
 
       resip::SharedPtr<resip::MasterProfile> mProfile;
       resip::Security* mSecurity;
-      resip::SipStack mStack;
-      resip::DialogUsageManager mDum;
+      resip::FdPollGrp* mPollGrp;
+      resip::EventThreadInterruptor* mInterruptor;
+      resip::SipStack* mStack;
+      resip::EventStackThread* mStackThread;
+      resip::DialogUsageManager* mDum;
+
       TestProxy* mTestProxy;
       resip::Data mIp;
       int mPort;
@@ -607,6 +616,10 @@ private:
       // out of dialog refer
       resip::ServerSubscriptionHandle mServerSubscription;
       resip::SipMessage mReferMessage;
+
+      // special handling required for UAC Prack scenario - must call provideOffer from 
+      // onAnswer callback in order to get Offer to be provided in first PRACK
+      boost::shared_ptr<resip::SdpContents> mOfferToProvideInNextOnAnswerCallback;
 
       typedef std::set<TestUsage*> TestUsages;
       TestUsages mTestUsages;

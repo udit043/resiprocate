@@ -3,9 +3,12 @@
 
 #include <rutil/compat.hxx>
 #include <asio.hpp>
-#include "../AsyncSocketBaseHandler.hxx"
-#include "../DataBuffer.hxx"
-#include "../StunTuple.hxx"
+#ifdef USE_SSL
+#include <asio/ssl.hpp>
+#endif
+#include "reTurn/AsyncSocketBaseHandler.hxx"
+#include "reTurn/DataBuffer.hxx"
+#include "reTurn/StunTuple.hxx"
 
 namespace reTurn {
 

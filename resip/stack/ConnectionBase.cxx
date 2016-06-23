@@ -2,11 +2,21 @@
 #include "config.h"
 #endif
 
+#include <memory>
+
 #include "rutil/Logger.hxx"
 #include "resip/stack/ConnectionBase.hxx"
+#include "resip/stack/WsConnectionBase.hxx"
 #include "resip/stack/SipMessage.hxx"
 #include "resip/stack/WsDecorator.hxx"
+#include "resip/stack/Cookie.hxx"
+#include "resip/stack/WsBaseTransport.hxx"
+#include "resip/stack/WsCookieContext.hxx"
+#include "resip/stack/WsCookieContextFactory.hxx"
+#include "resip/stack/Symbols.hxx"
 #include "rutil/WinLeakCheck.hxx"
+#include "rutil/SharedPtr.hxx"
+#include "rutil/Sha1.hxx"
 
 #ifdef USE_SSL
 #include "resip/stack/ssl/Security.hxx"
@@ -74,9 +84,10 @@ ConnectionBase::ConnectionBase(Transport* transport, const Tuple& who, Compressi
    DebugLog (<< "No compression library available: " << this);
 #endif
 
-   // deprecated; stop doing this eventually
-   mWho.transport=mTransport;
-   mWho.transportKey=mTransport ? mTransport->getKey() : 0;
+   if(mTransport) 
+   {
+      mWho.mTransportKey = mTransport->getKey();
+   }
 }
 
 ConnectionBase::~ConnectionBase()
@@ -166,8 +177,8 @@ ConnectionBase::preparseNewBytes(int bytesRead)
             }
          }
 
-         assert(mTransport);
-         mMessage = new SipMessage(mTransport);
+         resip_assert(mTransport);
+         mMessage = new SipMessage(&mTransport->getTuple());
          
          DebugLog(<< "ConnectionBase::process setting source " << mWho);
          mMessage->setSource(mWho);
@@ -202,18 +213,18 @@ ConnectionBase::preparseNewBytes(int bytesRead)
             mBuffer = 0;
             delete mMessage;
             mMessage = 0;
-            mConnState=NewMessage;
+            mConnState = NewMessage;
             return false;
          }
 
-         if (mMsgHeaderScanner.getHeaderCount() > 256)
+         if (mMsgHeaderScanner.getHeaderCount() > 1024)
          {
             WarningLog(<< "Discarding preparse; too many headers");
             delete [] mBuffer;
             mBuffer = 0;
             delete mMessage;
             mMessage = 0;
-            mConnState=NewMessage;
+            mConnState = NewMessage;
             return false;
          }
 
@@ -229,7 +240,7 @@ ConnectionBase::preparseNewBytes(int bytesRead)
             mBuffer = 0;
             delete mMessage;
             mMessage = 0;
-            mConnState=NewMessage;
+            mConnState = NewMessage;
             return false;
          }
 
@@ -425,7 +436,7 @@ ConnectionBase::preparseNewBytes(int bytesRead)
                {
                   Transport::stampReceived(mMessage);
                   DebugLog(<< "##Connection: " << *this << " received: " << *mMessage);
-                  assert( mTransport );
+                  resip_assert( mTransport );
                   mTransport->pushRxMsgUp(mMessage);
                   mMessage = 0;
                }
@@ -500,7 +511,7 @@ ConnectionBase::preparseNewBytes(int bytesRead)
                DebugLog(<< "##ConnectionBase: " << *this << " received: " << *mMessage);
 
                Transport::stampReceived(mMessage);
-               assert( mTransport );
+               resip_assert( mTransport );
                mTransport->pushRxMsgUp(mMessage);
                mMessage = 0;
             }
@@ -528,9 +539,53 @@ ConnectionBase::preparseNewBytes(int bytesRead)
          break;
       }
       default:
-         assert(0);
+         resip_assert(0);
    }
    return true;
+}
+
+void
+ConnectionBase::wsParseCookies(CookieList& cookieList, const SipMessage* message)
+{
+   Data name;
+   Data value;
+   StringCategories::const_iterator it = message->header(h_Cookies).begin();
+   for (; it != message->header(h_Cookies).end(); ++it)
+   {
+      ParseBuffer pb((*it).value());
+      while(!pb.eof())
+      {
+         const char* anchor =  pb.skipWhitespace();
+
+         pb.skipToChar(Symbols::EQUALS[0]);
+         pb.data(name, anchor);
+
+         anchor = pb.skipChar(Symbols::EQUALS[0]);
+         if(*(pb.position()) == Symbols::DOUBLE_QUOTE[0])
+         {
+            anchor = pb.skipChar(Symbols::DOUBLE_QUOTE[0]);
+            pb.skipToChar(Symbols::DOUBLE_QUOTE[0]);
+            pb.data(value, anchor);
+            pb.skipChar(Symbols::DOUBLE_QUOTE[0]);
+         }
+         else
+         {
+            pb.skipToOneOf(Symbols::SEMI_COLON, ParseBuffer::Whitespace);
+            pb.data(value, anchor);
+         }
+
+         Cookie cookie(name, value);
+         cookieList.push_back(cookie);
+         DebugLog(<< "Cookie: " << cookie);
+
+         if(!pb.eof() && *(pb.position()) == Symbols::SEMI_COLON[0])
+         {
+            pb.skipChar(Symbols::SEMI_COLON[0]);
+         }
+
+         pb.skipWhitespace();
+      }
+   }
 }
 
 /*
@@ -550,110 +605,86 @@ ConnectionBase::wsProcessHandshake(int bytesRead, bool &dropConnection)
       return false;
    }
 
-   mMessage = new SipMessage(mWho.transport);
-   assert(mMessage);
+   resip_assert(mTransport);
+   mMessage = new SipMessage(&mTransport->getTuple());
+   resip_assert(mMessage);
 
-   mMessage->setSource(mWho);
-   mMessage->setTlsDomain(mWho.transport->tlsDomain());
+   mMessage->setSource(mWho);   
+   mMessage->setTlsDomain(mTransport->tlsDomain());
 
-   mMsgHeaderScanner.prepareForMessage(mMessage);
-   char *unprocessedCharPtr;
-   MsgHeaderScanner::ScanChunkResult scanResult = mMsgHeaderScanner.scanChunk(mBuffer, mBufferPos + bytesRead, &unprocessedCharPtr);
-   if (scanResult != MsgHeaderScanner::scrEnd)
+   if (!scanMsgHeader(bytesRead)) 
    {
-      if(scanResult != MsgHeaderScanner::scrNextChunk)
-      {
-         StackLog(<<"Failed to parse message, more bytes needed");
-         StackLog(<< Data(mBuffer, bytesRead));
-      }
-      delete mMessage;
-      mMessage=0;
-      mBufferPos += bytesRead;
       return false;
    }
 
    try
    {
-      Data wsResponse;
-      wsResponse =		"HTTP/1.1 101 WebSocket Protocol Handshake\r\n"
-            "Upgrade: WebSocket\r\n"
-            "Connection: Upgrade\r\n"
-            "Sec-WebSocket-Protocol: sip\r\n";
-
-      if(mMessage->exists(h_SecWebSocketKey1) && mMessage->exists(h_SecWebSocketKey2))
+      WsConnectionBase* wsConnectionBase = dynamic_cast<WsConnectionBase*>(this);
+      CookieList cookieList;
+      if(wsConnectionBase)
       {
-         Data SecWebSocketKey1 =  mMessage->const_header(h_SecWebSocketKey1).value();
-         Data SecWebSocketKey2 =  mMessage->const_header(h_SecWebSocketKey2).value();
-         Data Digits1, Digits2;
-         unsigned int SpacesCount1 = 0, SpacesCount2 = 0;
-         unsigned int Value1, Value2;
-         for(unsigned int i = 0; i < SecWebSocketKey1.size(); ++i)
+         SharedPtr<WsCookieContext> wsCookieContext((WsCookieContext*)0);
+         if (mMessage->exists(h_Cookies))
          {
-            if(SecWebSocketKey1[i] == ' ') ++SpacesCount1;
-            if(isdigit(SecWebSocketKey1[i])) Digits1 += SecWebSocketKey1[i];
+            WsBaseTransport* wst = dynamic_cast<WsBaseTransport*>(mTransport);
+            resip_assert(wst);
+            try
+            {
+               wsParseCookies(cookieList, mMessage);
+               wsConnectionBase->setCookies(cookieList);
+               // Use of resip WsCookieContext capabilities is not mandatory,
+               // only try to use it if cookieContextFactory is available
+               if(wst->cookieContextFactory().get())
+               {
+                  Uri& requestUri = mMessage->header(h_RequestLine).uri();
+                  wsCookieContext = wst->cookieContextFactory()->makeCookieContext(cookieList, requestUri);
+                  wsConnectionBase->setWsCookieContext(wsCookieContext);
+               }
+            }
+            catch(ParseException& ex)
+            {
+               WarningLog(<<"Failed to parse cookies into WsCookieContext: " << ex);
+            }
          }
-         Value1 = htonl(Digits1.convertUnsignedLong() / SpacesCount1);
-         for(unsigned int i = 0; i < SecWebSocketKey2.size(); ++i)
+         SharedPtr<WsConnectionValidator> wsConnectionValidator = wsConnectionBase->connectionValidator();
+         if(wsConnectionValidator &&
+            (!wsCookieContext.get() || !wsConnectionValidator->validateConnection(*wsCookieContext)))
          {
-            if(SecWebSocketKey2[i] == ' ') ++SpacesCount2;
-            if(isdigit(SecWebSocketKey2[i])) Digits2 += SecWebSocketKey2[i];
+            ErrLog(<<"WebSocket cookie validation failed, dropping connection");
+            // FIXME: should send back a HTTP error code:
+            //   400 if the cookie was not in the right syntax
+            //   403 if the cookie was well formed but rejected
+            //       due to expiry or a bad HMAC
+            delete mMessage;
+            mMessage = 0;
+            mBufferPos = 0;
+            dropConnection = true;
+            return false;
          }
-         Value2 = htonl(Digits2.convertUnsignedLong() / SpacesCount2);
-
-         MD5Stream wsMD5Stream;
-         char tmp[9] = { '\0' };
-         memcpy(tmp, &Value1, 4);
-         memcpy(&tmp[4], &Value2, 4);
-         wsMD5Stream << tmp;
-         if(unprocessedCharPtr < (mBuffer + mBufferPos + bytesRead))
-         {
-            unsigned int dataLen = (mBuffer + mBufferPos + bytesRead) - unprocessedCharPtr;
-            Data content(unprocessedCharPtr, dataLen);
-            wsMD5Stream << content;
-         }
-
-         if(mMessage->exists(h_Origin))
-         {
-            wsResponse += "Sec-WebSocket-Origin: " + mMessage->const_header(h_Origin).value() + "\r\n";
-         }
-         if(mMessage->exists(h_Host))
-         {
-            wsResponse += Data("Sec-WebSocket-Location: ") + Data(transport()->transport() == resip::WSS ? "wss://" : "ws://") + mMessage->const_header(h_Host).value() + Data("/\r\n");
-         }
-         wsResponse += "\r\n" + wsMD5Stream.getBin();
-         ErrLog(<<"WS client wants to use depracated protocol version, unsupported");
-         delete mMessage;
-         mMessage = 0;
-         mBufferPos = 0;
-         dropConnection = true;
-         return false;
       }
-      else if(mMessage->exists(h_SecWebSocketKey))
+
+      std::auto_ptr<Data> wsResponsePtr = makeWsHandshakeResponse();
+
+      if (wsResponsePtr.get())
       {
-#ifdef USE_SSL
-         SHA1Stream wsSha1Stream;
-         wsSha1Stream << (mMessage->const_header(h_SecWebSocketKey).value() + Data("258EAFA5-E914-47DA-95CA-C5AB0DC85B11"));
-         Data wsAcceptKey = wsSha1Stream.getBin(160).base64encode();
-         wsResponse +=	"Sec-WebSocket-Accept: "+ wsAcceptKey +"\r\n"
-               "\r\n";
-#endif
+         DebugLog (<< "WebSocket upgrade accepted, cookie count = " << cookieList.size());
+
+         mOutstandingSends.push_back(new SendData(
+                  who(),
+                  *wsResponsePtr.get(),
+                  Data::Empty,
+                  Data::Empty,
+                  true));
       }
       else
       {
-         ErrLog(<<"No SecWebSocketKey header");
+         ErrLog(<<"Failed to parse WebSocket initialization request");
          delete mMessage;
          mMessage = 0;
          mBufferPos = 0;
          dropConnection = true;
          return false;
       }
-
-      mOutstandingSends.push_back(new SendData(
-            who(),
-            wsResponse,
-            Data::Empty,
-            Data::Empty,
-            true));
    }
    catch(resip::ParseException& e)
    {
@@ -673,6 +704,75 @@ ConnectionBase::wsProcessHandshake(int bytesRead, bool &dropConnection)
 }
 
 bool
+ConnectionBase::scanMsgHeader(int bytesRead)
+{
+   mMsgHeaderScanner.prepareForMessage(mMessage);
+   char *unprocessedCharPtr;
+   MsgHeaderScanner::ScanChunkResult scanResult = mMsgHeaderScanner.scanChunk(mBuffer, mBufferPos + bytesRead, &unprocessedCharPtr);
+   if (scanResult != MsgHeaderScanner::scrEnd)
+   {
+      if(scanResult != MsgHeaderScanner::scrNextChunk)
+      {
+         StackLog(<<"Failed to parse message, more bytes needed");
+         StackLog(<< Data(mBuffer, bytesRead));
+      }
+      delete mMessage;
+      mMessage=0;
+      mBufferPos += bytesRead;
+      return false;
+   }
+   return true;
+}
+
+std::auto_ptr<Data>
+ConnectionBase::makeWsHandshakeResponse()
+{
+   std::auto_ptr<Data> responsePtr(0);
+   if(isUsingSecWebSocketKey())
+   {
+      responsePtr.reset(new Data("HTTP/1.1 101 WebSocket Protocol Handshake\r\n"
+         "Upgrade: WebSocket\r\n"
+         "Connection: Upgrade\r\n"
+         "Sec-WebSocket-Protocol: sip\r\n"));
+
+      // Assuming that OpenSSL implementation of SHA1 is more effient than our internal one
+#ifdef USE_SSL
+      SHA1Stream wsSha1Stream;
+      wsSha1Stream << (mMessage->const_header(h_SecWebSocketKey).value() + Symbols::WebsocketMagicGUID);
+      Data wsAcceptKey = wsSha1Stream.getBin(160).base64encode();
+#else
+      SHA1 sha1;
+      sha1.update(mMessage->const_header(h_SecWebSocketKey).value().c_str());
+      sha1.update(Symbols::WebsocketMagicGUID);
+      Data wsAcceptKey = sha1.finalBin().base64encode();
+#endif
+      *responsePtr += "Sec-WebSocket-Accept: " + wsAcceptKey + "\r\n\r\n";
+   }
+   else if(isUsingDeprecatedSecWebSocketKeys())
+   {
+      ErrLog(<<"WS client wants to use depracated protocol version, unsupported");
+   }
+   else
+   {
+      ErrLog(<<"No SecWebSocketKey header");
+   }
+   return responsePtr;
+}
+
+bool ConnectionBase::isUsingDeprecatedSecWebSocketKeys()
+{
+   resip_assert(mMessage);
+   return mMessage->exists(h_SecWebSocketKey1) &&
+      mMessage->exists(h_SecWebSocketKey2);
+}
+
+bool ConnectionBase::isUsingSecWebSocketKey()
+{
+   resip_assert(mMessage);
+   return mMessage->exists(h_SecWebSocketKey);
+}
+
+bool
 ConnectionBase::wsProcessData(int bytesRead)
 {
    bool dropConnection = false;
@@ -684,10 +784,38 @@ ConnectionBase::wsProcessData(int bytesRead)
       // mWsBuffer should now contain a discrete SIP message, let the
       // stack go to work on it
 
-      mMessage = new SipMessage(mWho.transport);
+      if(msg->size() == 4 && memcmp(msg->data(), "\r\n\r\n", 4) == 0)
+      {
+         // sending a keep alive reply now
+         StackLog(<<"got a SIP ping embedded in WebSocket frame, replying");
+         onDoubleCRLF();
+         msg = mWsFrameExtractor.processBytes(0, 0, dropConnection);
+         continue;
+      }
+
+      resip_assert(mTransport);
+      mMessage = new SipMessage(&mTransport->getTuple());
 
       mMessage->setSource(mWho);
-      mMessage->setTlsDomain(mWho.transport->tlsDomain());
+      mMessage->setTlsDomain(mTransport->tlsDomain());
+
+#ifdef USE_SSL
+      // Set TlsPeerName if message is from TlsConnection
+      TlsConnection *tlsConnection = dynamic_cast<TlsConnection *>(this);
+      if(tlsConnection)
+      {
+         std::list<Data> peerNameList;
+         tlsConnection->getPeerNames(peerNameList);
+         mMessage->setTlsPeerNames(peerNameList);
+      }
+#endif
+
+      WsConnectionBase *wsConnectionBase = dynamic_cast<WsConnectionBase *>(this);
+      if (wsConnectionBase)
+      {
+         mMessage->setWsCookies(wsConnectionBase->getCookies());
+         mMessage->setWsCookieContext(wsConnectionBase->getWsCookieContext());
+      }
 
       Data::size_type msg_len = msg->size();
       // cast permitted, as it is borrowed:
@@ -721,7 +849,7 @@ ConnectionBase::wsProcessData(int bytesRead)
       if (mMessage)
       {
          Transport::stampReceived(mMessage);
-         assert( mTransport );
+         resip_assert( mTransport );
          mTransport->pushRxMsgUp(mMessage);
          mMessage = 0;
       }
@@ -764,6 +892,17 @@ ConnectionBase::decompressNewBytes(int bytesRead)
 
     mMessage->setSource(mWho);
     mMessage->setTlsDomain(mWho.transport->tlsDomain());
+
+#ifdef USE_SSL
+    // Set TlsPeerName if message is from TlsConnection
+    TlsConnection *tlsConnection = dynamic_cast<TlsConnection *>(this);
+    if(tlsConnection)
+    {
+       std::list<Data> peerNameList;
+       tlsConnection->getPeerNames(peerNameList);
+       mMessage->setTlsPeerNames(peerNameList);
+    }
+#endif
 
     char *sipBuffer = new char[bytesUncompressed];
     memmove(sipBuffer, uncompressed, bytesUncompressed);
@@ -832,7 +971,7 @@ ConnectionBase::decompressNewBytes(int bytesRead)
            mSigcompStack->provideCompartmentId(sc, compId.data(), compId.size());
         }
       }
-      assert( mTransport );
+      resip_assert( mTransport );
       mTransport->pushRxMsgUp(mMessage);
       mMessage = 0;
       sc = 0;
@@ -906,7 +1045,7 @@ ConnectionBase::getWriteBufferForExtraBytes(int extraBytes)
    }
    else
    {
-      assert(0);
+      resip_assert(0);
       return mBuffer;
    }
 }
@@ -922,7 +1061,7 @@ ConnectionBase::setBuffer(char* bytes, int count)
 Transport* 
 ConnectionBase::transport() const
 {
-   assert(this);
+   resip_assert(this);
    return mTransport;
 }
 

@@ -2,7 +2,7 @@
 #include "config.h"
 #endif
 
-#include <cassert>
+#include "rutil/ResipAssert.h"
 
 #include <rutil/Data.hxx>
 #include <rutil/Socket.hxx>
@@ -17,6 +17,7 @@
 #include "repro/XmlRpcServerBase.hxx"
 #include "repro/XmlRpcConnection.hxx"
 #include <rutil/WinLeakCheck.hxx>
+#include "rutil/Errdes.hxx"
 
 using namespace repro;
 using namespace resip;
@@ -25,8 +26,8 @@ using namespace std;
 #define RESIPROCATE_SUBSYSTEM Subsystem::REPRO
 
 
-XmlRpcServerBase::XmlRpcServerBase(int port, IpVersion ipVer) :
-   mTuple(Data::Empty,port,ipVer,TCP,Data::Empty),
+XmlRpcServerBase::XmlRpcServerBase(int port, IpVersion ipVer, Data ipAddr) :
+   mTuple(ipAddr,port,ipVer,TCP,Data::Empty),
    mSane(true)
 {   
 #ifdef USE_IPV6
@@ -39,14 +40,14 @@ XmlRpcServerBase::XmlRpcServerBase(int port, IpVersion ipVer) :
    {
       int e = getErrno();
       logSocketError(e);
-      ErrLog(<< "XmlRpcServerBase::XmlRpcServerBase: Failed to create socket: " << strerror(e));
+      ErrLog(<< "XmlRpcServerBase::XmlRpcServerBase: Failed to create socket: " << errortostringOS(e));
       mSane = false;
       return;
    }
 
    DebugLog (<< "XmlRpcServerBase::XmlRpcServerBase: Creating fd=" << (int)mFd 
              << (ipVer == V4 ? " V4/" : " V6/") );
-      
+
    int on = 1;
 #if !defined(WIN32)
    if (::setsockopt(mFd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)))
@@ -56,13 +57,29 @@ XmlRpcServerBase::XmlRpcServerBase(int port, IpVersion ipVer) :
    {
       int e = getErrno();
       logSocketError(e);
-      ErrLog(<< "XmlRpcServerBase::XmlRpcServerBase: Couldn't set sockoptions SO_REUSEPORT | SO_REUSEADDR: " << strerror(e));
+      ErrLog(<< "XmlRpcServerBase::XmlRpcServerBase: Couldn't set sockoptions SO_REUSEPORT | SO_REUSEADDR: " << errortostringOS(e));
       mSane = false;
       return;
    }
-   
+
+#ifdef USE_IPV6
+#ifdef __linux__
+   if (ipVer == V6)
+   {
+      if ( ::setsockopt(mFd, IPPROTO_IPV6, IPV6_V6ONLY, &on, sizeof(on)) )
+      {
+          int e = getErrno();
+          logSocketError(e);
+          ErrLog(<< "XmlRpcServerBase::XmlRpcServerBase: Couldn't set sockoptions IPV6_V6ONLY: " << errortostringOS(e));
+          mSane = false;
+          return;
+      }
+   }
+#endif
+#endif
+
    DebugLog(<< "XmlRpcServerBase::XmlRpcServerBase: Binding to " << Tuple::inet_ntop(mTuple));
-   
+
    if (::bind( mFd, &mTuple.getMutableSockaddr(), mTuple.length()) == SOCKET_ERROR)
    {
       int e = getErrno();
@@ -97,7 +114,7 @@ XmlRpcServerBase::XmlRpcServerBase(int port, IpVersion ipVer) :
    if (e != 0)
    {
       int e = getErrno();
-      InfoLog(<< "XmlRpcServerBase::XmlRpcServerBase: Failed listen " << strerror(e));
+      InfoLog(<< "XmlRpcServerBase::XmlRpcServerBase: Failed listen " << errortostringOS(e));
       mSane = false;
       return;
    }
@@ -187,11 +204,14 @@ XmlRpcServerBase::process(FdSet& fdset)
          int e = getErrno();
          switch (e)
          {
-            case EWOULDBLOCK:
+            case EAGAIN:
+#if EAGAIN != EWOULDBLOCK
+            case EWOULDBLOCK:  // Treat EGAIN and EWOULDBLOCK as the same: http://stackoverflow.com/questions/7003234/which-systems-define-eagain-and-ewouldblock-as-different-values
+#endif
                return;
             default:
                logSocketError(e);
-               ErrLog(<< "XmlRpcServerBase::process: Some error reading from socket: " << e);
+               ErrLog(<< "XmlRpcServerBase::process: Some error reading from socket: " << e << "error message : " << errortostringOS(e));
          }
          return;
       }
@@ -274,22 +294,22 @@ XmlRpcServerBase::logSocketError(int e)
    switch (e)
    {
       case EAGAIN:
-         InfoLog (<< "No data ready to read" << strerror(e));
+         InfoLog (<< "No data ready to read" << errortostringOS(e));
          break;
       case EINTR:
-         InfoLog (<< "The call was interrupted by a signal before any data was read : " << strerror(e));
+         InfoLog (<< "The call was interrupted by a signal before any data was read : " << errortostringOS(e));
          break;
       case EIO:
-         InfoLog (<< "I/O error : " << strerror(e));
+         InfoLog (<< "I/O error : " << errortostringOS(e));
          break;
       case EBADF:
-         InfoLog (<< "fd is not a valid file descriptor or is not open for reading : " << strerror(e));
+         InfoLog (<< "fd is not a valid file descriptor or is not open for reading : " << errortostringOS(e));
          break;
       case EINVAL:
-         InfoLog (<< "fd is attached to an object which is unsuitable for reading : " << strerror(e));
+         InfoLog (<< "fd is attached to an object which is unsuitable for reading : " << errortostringOS(e));
          break;
       case EFAULT:
-         InfoLog (<< "buf is outside your accessible address space : " << strerror(e));
+         InfoLog (<< "buf is outside your accessible address space : " << errortostringOS(e));
          break;
 
 #if defined(WIN32)
@@ -343,7 +363,7 @@ XmlRpcServerBase::logSocketError(int e)
          InfoLog (<<"Connection reset ");
          break;
 
-	   case WSAEWOULDBLOCK:
+      case WSAEWOULDBLOCK:
          DebugLog (<<"Would Block ");
          break;
 
@@ -387,7 +407,7 @@ XmlRpcServerBase::logSocketError(int e)
 #endif
 
       default:
-         InfoLog (<< "Some other error (" << e << "): " << strerror(e));
+         InfoLog (<< "Some other error (" << e << "): " << errortostringOS(e));
          break;
    }
 }

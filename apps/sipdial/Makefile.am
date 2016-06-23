@@ -15,8 +15,9 @@ SUBDIRS = .
 
 lib_LTLIBRARIES = libsipdial.la
 libsipdial_la_LIBADD = ../../resip/dum/libdum.la
-libsipdial_la_LIBADD += ../../resip/stack/libresip.la ../../rutil/librutil.la
-libsipdial_la_LIBADD += @LIBSSL_LIBADD@ -lpthread
+libsipdial_la_LIBADD += ../../resip/stack/libresip.la
+libsipdial_la_LIBADD += ../../rutil/librutil.la
+libsipdial_la_LIBADD += @LIBSSL_LIBADD@ @LIBPTHREAD_LIBADD@
 libsipdial_la_LDFLAGS = @LIBTOOL_VERSION_RELEASE@
 libsipdial_la_LDFLAGS += -export-dynamic
 

@@ -2,9 +2,13 @@
 #define TURNASYNCUDPSOCKET_HXX
 
 #include <asio.hpp>
+#ifdef USE_SSL
+#include <asio/ssl.hpp>
+#endif
+#include <boost/bind.hpp>
 
 #include "TurnAsyncSocket.hxx"
-#include "../AsyncUdpSocketBase.hxx"
+#include "reTurn/AsyncUdpSocketBase.hxx"
 
 namespace reTurn {
 

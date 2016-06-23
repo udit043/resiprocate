@@ -28,32 +28,68 @@ int
 main(int argc, char** argv)
 {
    Log::initialize(Log::Cout, Log::Debug, argv[0]);
-   static ExtensionParameter p_tag_ext("tag");
-#
-   Data txt(
-      "SIP/2.0 401 Unauthorized\r\n"
-      "To: <sip:6309790007@ahenc1.ascc.lucent.com>;tag=43822895-1132606320408559\r\n"
-      "From: \"Kit LDAP\"<sip:6309790007@ahenc1.ascc.lucent.com>;tag=64505823\r\n"
-      "Call-ID: 7574556ad424b15c@aW5zcDc1MDAudW5pY29uLWludGwuY29t\r\n"
-      "CSeq: 1 PUBLISH\r\n"
-      "Via: SIP/2.0/UDP 67.184.22.204:33001;received=67.184.22.204;branch=z9hG4bK" RESIP_COOKIE "1---861ee62db418b378\r\n"
-      "Server: Lucent SIPTRANS 1.2\r\n"
-      "WWW-Authenticate: Digest realm=\"aP3nFt10ziWg41Su4s8\", \r\n"
-      "   nonce=\"d6cb083cced5583c140c5f99eb81feda\", algorithm=MD5, qop=\"auth\", \r\n"
-      "   opaque=\"f2a62109ee6526c8760e4e7497861aac\"\r\n"
-      "Content-Length: 0\r\n"
-      "\r\n"
-      );
    initNetwork();
 
-   auto_ptr<SipMessage> msg(TestSupport::makeMessage(txt));
-   assert(msg.get());   
-   resipCerr << Inserter(msg->header(h_WWWAuthenticates)) << endl;
-   
-   resipCerr << "[" << msg->header(h_WWWAuthenticates).back().param(p_opaque) << "]" << endl;
+   {
+      // This test excercises a now fixed use-after-free bug when adding multi-headers to a list that has been copied, and then
+      // one of the headers is accessed (but not necessarily parsed).  
+      Data txt("INVITE sip:192.168.2.92:5100;q=1 SIP/2.0\r\n"
+         "Record-Route: <sip:rruser@rrdomain;lr>\r\n"
+         "To: <sip:yiwen_AT_meet2talk.com@whistler.gloo.net>\r\n"
+         "From: Jason Fischl<sip:jason_AT_meet2talk.com@whistler.gloo.net>;tag=ba1aee2d\r\n"
+         "Via: SIP/2.0/UDP 192.168.2.220:5060;branch=z9hG4bK-c87542-da4d3e6a.0-1--c87542-;rport=5060;received=192.168.2.220;stid=579667358\r\n"
+         "Via: SIP/2.0/UDP 192.168.2.15:5100;branch=z9hG4bK-c87542-579667358-1--c87542-;rport=5100;received=192.168.2.15\r\n"
+         "Call-ID: 6c64b42fce01b007\r\n"
+         "CSeq: 2 INVITE\r\n"
+         "Route: <sip:proxy@192.168.2.220:5060;lr>\r\n"
+         "Contact: <sip:192.168.2.15:5100>\r\n"
+         "Content-Length: 0\r\n"
+         "\r\n");
 
-   assert(msg->header(h_WWWAuthenticates).back().param(p_opaque) == "f2a62109ee6526c8760e4e7497861aac");
-   
+      auto_ptr<SipMessage> msg(SipMessage::make(txt, true /* isExternal */));
+
+      SipMessage response;
+      Helper::makeResponse(response, *msg, 200);
+
+      // Trigger a parse of Record-Route
+      NameAddr rr("sip:test@rr.com");
+      if(!(response.header(h_RecordRoutes).front() == rr))
+      {
+         //
+      }
+      // Now push a new Record-Route
+      response.header(h_RecordRoutes).push_front(rr);
+      assert(response.header(h_RecordRoutes).back().uri().user() == "rruser");
+
+      //InfoLog(<< response);
+   }
+
+   static ExtensionParameter p_tag_ext("tag");
+   {
+      Data txt(
+            "SIP/2.0 401 Unauthorized\r\n"
+            "To: <sip:6309790007@ahenc1.ascc.lucent.com>;tag=43822895-1132606320408559\r\n"
+            "From: \"Kit LDAP\"<sip:6309790007@ahenc1.ascc.lucent.com>;tag=64505823\r\n"
+            "Call-ID: 7574556ad424b15c@aW5zcDc1MDAudW5pY29uLWludGwuY29t\r\n"
+            "CSeq: 1 PUBLISH\r\n"
+            "Via: SIP/2.0/UDP 67.184.22.204:33001;received=67.184.22.204;branch=z9hG4bK" RESIP_COOKIE "1---861ee62db418b378\r\n"
+            "Server: Lucent SIPTRANS 1.2\r\n"
+            "WWW-Authenticate: Digest realm=\"aP3nFt10ziWg41Su4s8\", \r\n"
+            "   nonce=\"d6cb083cced5583c140c5f99eb81feda\", algorithm=MD5, qop=\"auth\", \r\n"
+            "   opaque=\"f2a62109ee6526c8760e4e7497861aac\"\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n"
+            );
+
+      auto_ptr<SipMessage> msg(TestSupport::makeMessage(txt));
+      assert(msg.get());   
+      resipCerr << Inserter(msg->header(h_WWWAuthenticates)) << endl;
+
+      resipCerr << "[" << msg->header(h_WWWAuthenticates).back().param(p_opaque) << "]" << endl;
+
+      assert(msg->header(h_WWWAuthenticates).back().param(p_opaque) == "f2a62109ee6526c8760e4e7497861aac");
+   }
+
    {
       Data txt(
          "To: sip:fluffy@h1.cs.sipit.net\r\n"
@@ -2210,9 +2246,61 @@ main(int argc, char** argv)
       assert(embeddedMsg2.header(h_Requires).find(Token(Symbols::Replaces)));
    }
 
+   {
+      Data txt(
+         "GET / HTTP/1.1\r\n"
+         "Upgrade: websocket\r\n"
+         "Connection: Upgrade\r\n"
+         "Host: localhost\r\n"
+         "Origin: http://localhost\r\n"
+         "Sec-WebSocket-Protocol: sip\r\n"
+         "Pragma: no-cache\r\n"
+         "Cache-Control: no-cache\r\n"
+         "Sec-WebSocket-Key: rFi6Qbjr0EmH04nUqfCAKQ==\r\n"
+         "Sec-WebSocket-Version: 13\r\n"
+         "Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits, x-webkit-deflate-frame\r\n"
+         "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/37.0.2062.120 Safari/537.36\r\n"
+         "\r\n" );
+
+      auto_ptr<SipMessage> msg(TestSupport::makeMessage(txt.c_str()));
+
+      assert(msg->header(h_RequestLine).unknownMethodName() == "GET");
+      assert(msg->header(h_RequestLine).uri().path() == "/");
+      assert( msg->header(h_ContentLength).value() == 0 );
+   }
+
+   {
+      Data txt(
+         "GET /;p1=123;p2=456 HTTP/1.1\r\n"
+         "Upgrade: websocket\r\n"
+         "Connection: Upgrade\r\n"
+         "Host: localhost\r\n"
+         "Origin: http://localhost\r\n"
+         "Sec-WebSocket-Protocol: sip\r\n"
+         "Pragma: no-cache\r\n"
+         "Cache-Control: no-cache\r\n"
+         "Sec-WebSocket-Key: rFi6Qbjr0EmH04nUqfCAKQ==\r\n"
+         "Sec-WebSocket-Version: 13\r\n"
+         "Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits, x-webkit-deflate-frame\r\n"
+         "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/37.0.2062.120 Safari/537.36\r\n"
+         "\r\n" );
+
+      auto_ptr<SipMessage> msg(TestSupport::makeMessage(txt.c_str()));
+
+      assert(msg->header(h_RequestLine).unknownMethodName() == "GET");
+      Uri& uri = msg->header(h_RequestLine).uri();
+      assert(uri.path() == "/");
+      assert(uri.param(UnknownParameterType("p1")) == Data("123"));
+      assert(uri.param(UnknownParameterType("p2")) == Data("456"));
+
+      assert( msg->header(h_ContentLength).value() == 0 );
+   }
+
    resipCerr << "\nTEST OK" << endl;
    return 0;
 }
+
+/* vim: softtabstop=3:shiftwidth=3:expandtab */
 
 /* ====================================================================
  * The Vovida Software License, Version 1.0 

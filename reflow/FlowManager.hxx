@@ -8,13 +8,9 @@
 #include "MediaStream.hxx"
 #include "FlowManagerException.hxx"
 
-#ifdef USE_SSL
-#ifdef USE_DTLS
 #include "dtls_wrapper/DtlsFactory.hxx"
-#endif //USE_DTLS
 #include <openssl/crypto.h>
 #include <openssl/ssl.h>
-#endif //USE_SSL 
 
 #include <map>
 
@@ -34,7 +30,6 @@ namespace flowmanager
   Author: Scott Godin (sgodin AT SipSpectrum DOT com)
 */
 class IOServiceThread;
-class MediaStreamHandler;
 
 class FlowManager
 {
@@ -53,14 +48,9 @@ public:
                                   const char* stunUsername = 0,
                                   const char* stunPassword = 0);
 
-#ifdef USE_SSL
-#ifdef USE_DTLS
    void initializeDtlsFactory(const char* certAor);
    dtls::DtlsFactory* getDtlsFactory() { return mDtlsFactory; }
-#endif //USE_DTLS
-#endif //USE_SSL   
 
-   asio::io_service& getIOService() { return mIOService; }
 protected: 
 
 private:
@@ -70,18 +60,12 @@ private:
    asio::io_service mIOService;
    IOServiceThread* mIOServiceThread;
    asio::io_service::work* mIOServiceWork;
-#ifdef USE_SSL
    static int createCert (const resip::Data& pAor, int expireDays, int keyLen, X509*& outCert, EVP_PKEY*& outKey );
    asio::ssl::context mSslContext;
-#endif
    
-#ifdef USE_SSL
    X509* mClientCert;
    EVP_PKEY* mClientKey;
-#ifdef USE_DTLS
    dtls::DtlsFactory* mDtlsFactory;
-#endif //USE_DTLS
-#endif //USE_SSL
 };
 
 }

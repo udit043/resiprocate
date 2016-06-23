@@ -60,12 +60,14 @@
 #include "resip/dum/OutgoingEvent.hxx"
 #include "resip/dum/DumHelper.hxx"
 #include "resip/dum/MergedRequestRemovalCommand.hxx"
+#include "resip/dum/InMemorySyncPubDb.hxx"
+#include "rutil/ResipAssert.h"
 #include "rutil/Inserter.hxx"
 #include "rutil/Logger.hxx"
 #include "rutil/Random.hxx"
 #include "rutil/Lockable.hxx"
-#include "rutil/WinLeakCheck.hxx"
 #include "rutil/Timer.hxx"
+#include "rutil/WinLeakCheck.hxx"
 
 #ifdef USE_SSL
 #include "resip/stack/ssl/Security.hxx"
@@ -83,7 +85,7 @@ using namespace std;
    {                                                                    \
       if(mThreadDebugKey)                                               \
       {                                                                 \
-         assert(ThreadIf::tlsGetValue(mThreadDebugKey));                \
+         resip_assert(ThreadIf::tlsGetValue(mThreadDebugKey));                \
       }                                                                 \
    } while (false)
 #else
@@ -103,6 +105,7 @@ DialogUsageManager::DialogUsageManager(SipStack& stack, bool createDefaultFeatur
    mDialogSetHandler(0),
    mRequestValidationHandler(0),
    mRegistrationPersistenceManager(0),
+   mPublicationPersistenceManager(0),
    mIsDefaultServerReferHandler(true),
    mClientPagerMessageHandler(0),
    mServerPagerMessageHandler(0),
@@ -142,9 +145,7 @@ DialogUsageManager::DialogUsageManager(SipStack& stack, bool createDefaultFeatur
 #if defined (USE_SSL)
       addOutgoingFeature(encryptionOutgoing);
 #endif
-
    }
-
 }
 
 DialogUsageManager::~DialogUsageManager()
@@ -152,14 +153,6 @@ DialogUsageManager::~DialogUsageManager()
    mShutdownState = Destroying;
    //InfoLog ( << "~DialogUsageManager" );
 
-#if(0)
-   // !kh!
-   DialogSetMap::iterator dialogSet = mDialogSetMap.begin();
-   for (; dialogSet != mDialogSetMap.end(); ++dialogSet)
-   {
-      delete dialogSet->second;
-   }
-#endif
    if(!mDialogSetMap.empty())
    {
       DebugLog(<< "DialogUsageManager::mDialogSetMap has " << mDialogSetMap.size() << " DialogSets");
@@ -179,7 +172,7 @@ DialogUsageManager::~DialogUsageManager()
    while(!mDialogSetMap.empty())
    {
       DialogSet*  ds = mDialogSetMap.begin()->second;
-      delete ds;
+      delete ds;  // Deleting a dialog set removes itself from the map
    }
 
    if(mIsDefaultServerReferHandler)
@@ -189,6 +182,18 @@ DialogUsageManager::~DialogUsageManager()
 
    delete mIncomingTarget;
    delete mOutgoingTarget;
+
+   // Delete Server Publications
+   while (!mServerPublications.empty())
+   {
+       delete mServerPublications.begin()->second;  // Deleting a ServerPublication removes itself from the map
+   }
+
+   // Remove any lingering incoming feature chain memory
+   for(FeatureChainMap::iterator it = mIncomingFeatureChainMap.begin(); it != mIncomingFeatureChainMap.end(); it++)
+   {
+      delete it->second;
+   }
 
    //InfoLog ( << "~DialogUsageManager done" );
 }
@@ -300,20 +305,20 @@ void DialogUsageManager::setAppDialogSetFactory(std::auto_ptr<AppDialogSetFactor
 SharedPtr<MasterProfile>&
 DialogUsageManager::getMasterProfile()
 {
-   assert(mMasterProfile.get());
+   resip_assert(mMasterProfile.get());
    return mMasterProfile;
 }
 
 SharedPtr<UserProfile>&
 DialogUsageManager::getMasterUserProfile()
 {
-   assert(mMasterUserProfile.get());
+   resip_assert(mMasterUserProfile.get());
    return mMasterUserProfile;
 }
 
 void DialogUsageManager::setMasterProfile(const SharedPtr<MasterProfile>& masterProfile)
 {
-   assert(!mMasterProfile.get());
+   resip_assert(!mMasterProfile.get());
    mMasterProfile = masterProfile;
    mMasterUserProfile = masterProfile; // required so that we can return a reference to SharedPtr<UserProfile> in getMasterUserProfile
 }
@@ -354,14 +359,14 @@ DialogUsageManager::setServerAuthManager(SharedPtr<ServerAuthManager> manager)
 void
 DialogUsageManager::setClientRegistrationHandler(ClientRegistrationHandler* handler)
 {
-   assert(!mClientRegistrationHandler);
+   resip_assert(!mClientRegistrationHandler);
    mClientRegistrationHandler = handler;
 }
 
 void
 DialogUsageManager::setServerRegistrationHandler(ServerRegistrationHandler* handler)
 {
-   assert(!mServerRegistrationHandler);
+   resip_assert(!mServerRegistrationHandler);
    mServerRegistrationHandler = handler;
 }
 
@@ -374,27 +379,29 @@ DialogUsageManager::setDialogSetHandler(DialogSetHandler* handler)
 void
 DialogUsageManager::setInviteSessionHandler(InviteSessionHandler* handler)
 {
-   assert(!mInviteSessionHandler);
+   resip_assert(!mInviteSessionHandler);
    mInviteSessionHandler = handler;
 }
 
 void
 DialogUsageManager::setRequestValidationHandler(RequestValidationHandler* handler)
 {
-   assert(!mRequestValidationHandler);
+   resip_assert(!mRequestValidationHandler);
    mRequestValidationHandler = handler;
 }
 
 void
 DialogUsageManager::setRegistrationPersistenceManager(RegistrationPersistenceManager* manager)
 {
-   assert(!mRegistrationPersistenceManager);
+   resip_assert(!mRegistrationPersistenceManager);
    mRegistrationPersistenceManager = manager;
 }
 
 void
-DialogUsageManager::setRemoteCertStore(auto_ptr<RemoteCertStore> store)
+DialogUsageManager::setPublicationPersistenceManager(PublicationPersistenceManager* manager)
 {
+   resip_assert(!mPublicationPersistenceManager);
+   mPublicationPersistenceManager = manager;
 }
 
 void
@@ -417,15 +424,15 @@ DialogUsageManager::addTimerMs(DumTimeout::Type type, unsigned long duration,
 void
 DialogUsageManager::addClientSubscriptionHandler(const Data& eventType, ClientSubscriptionHandler* handler)
 {
-   assert(handler);
-   assert(mClientSubscriptionHandlers.count(eventType) == 0);
+   resip_assert(handler);
+   resip_assert(mClientSubscriptionHandlers.count(eventType) == 0);
    mClientSubscriptionHandlers[eventType] = handler;
 }
 
 void
 DialogUsageManager::addServerSubscriptionHandler(const Data& eventType, ServerSubscriptionHandler* handler)
 {
-   assert(handler);
+   resip_assert(handler);
    //default do-nothing server side refer handler can be replaced
    if (eventType == "refer" && mServerSubscriptionHandlers.count(eventType))
    {
@@ -440,24 +447,24 @@ DialogUsageManager::addServerSubscriptionHandler(const Data& eventType, ServerSu
 void
 DialogUsageManager::addClientPublicationHandler(const Data& eventType, ClientPublicationHandler* handler)
 {
-   assert(handler);
-   assert(mClientPublicationHandlers.count(eventType) == 0);
+   resip_assert(handler);
+   resip_assert(mClientPublicationHandlers.count(eventType) == 0);
    mClientPublicationHandlers[eventType] = handler;
 }
 
 void
 DialogUsageManager::addServerPublicationHandler(const Data& eventType, ServerPublicationHandler* handler)
 {
-   assert(handler);
-   assert(mServerPublicationHandlers.count(eventType) == 0);
+   resip_assert(handler);
+   resip_assert(mServerPublicationHandlers.count(eventType) == 0);
    mServerPublicationHandlers[eventType] = handler;
 }
 
 void
 DialogUsageManager::addOutOfDialogHandler(MethodTypes type, OutOfDialogHandler* handler)
 {
-   assert(handler);
-   assert(mOutOfDialogHandlers.count(type) == 0);
+   resip_assert(handler);
+   resip_assert(mOutOfDialogHandlers.count(type) == 0);
    mOutOfDialogHandlers[type] = handler;
 }
 
@@ -539,14 +546,14 @@ DialogUsageManager::makeResponse(SipMessage& response,
                                  int responseCode,
                                  const Data& reason) const
 {
-   assert(request.isRequest());
+   resip_assert(request.isRequest());
    Helper::makeResponse(response, request, responseCode, reason);
 }
 
 void
 DialogUsageManager::sendResponse(const SipMessage& response)
 {
-   assert(response.isResponse());
+   resip_assert(response.isResponse());
    mStack.send(response, this);
 }
 
@@ -594,7 +601,7 @@ DialogUsageManager::makeInviteSession(const NameAddr& target,
 {
    SharedPtr<SipMessage> inv = makeInviteSession(target, userProfile, initialOffer, ads);
    // add replaces header
-   assert(sessionToReplace.isValid());
+   resip_assert(sessionToReplace.isValid());
    if(sessionToReplace.isValid())
    {
       CallId replaces;
@@ -618,7 +625,7 @@ DialogUsageManager::makeInviteSession(const NameAddr& target,
 {
    SharedPtr<SipMessage> inv = makeInviteSession(target, userProfile, initialOffer, level, alternative, ads);
    // add replaces header
-   assert(sessionToReplace.isValid());
+   resip_assert(sessionToReplace.isValid());
    if(sessionToReplace.isValid())
    {
       CallId replaces;
@@ -641,7 +648,7 @@ DialogUsageManager::makeInviteSession(const NameAddr& target,
 {
    SharedPtr<SipMessage> inv = makeInviteSession(target, initialOffer, level, alternative, ads);
    // add replaces header
-   assert(sessionToReplace.isValid());
+   resip_assert(sessionToReplace.isValid());
    if(sessionToReplace.isValid())
    {
       CallId replaces;
@@ -751,7 +758,7 @@ DialogUsageManager::makeRefer(const NameAddr& target, const H_ReferTo::Type& ref
 SharedPtr<SipMessage>
 DialogUsageManager::makeSubscription(const NameAddr& target, const SharedPtr<UserProfile>& userProfile, const Data& eventType, AppDialogSet* appDs)
 {
-   assert(userProfile.get());
+   resip_assert(userProfile.get());
    return makeNewSession(new SubscriptionCreator(*this, target, userProfile, eventType, userProfile->getDefaultSubscriptionTime()), appDs);
 }
 
@@ -792,7 +799,7 @@ DialogUsageManager::makeSubscription(const NameAddr& target, const Data& eventTy
 SharedPtr<SipMessage>
 DialogUsageManager::makeRegistration(const NameAddr& target, const SharedPtr<UserProfile>& userProfile, AppDialogSet* appDs)
 {
-   assert(userProfile.get());
+   resip_assert(userProfile.get());
    return makeNewSession(new RegistrationCreator(*this, target, userProfile, userProfile->getDefaultRegistrationTime()), appDs);
 }
 
@@ -881,7 +888,7 @@ DialogUsageManager::send(SharedPtr<SipMessage> msg)
       userProfile = ds->getUserProfile().get();
    }
 
-   assert(userProfile);
+   resip_assert(userProfile);
    if (!userProfile->isAnonymous() && userProfile->hasUserAgent())
    {
       msg->header(h_UserAgent).value() = userProfile->getUserAgent();
@@ -899,7 +906,7 @@ DialogUsageManager::send(SharedPtr<SipMessage> msg)
       msg->remove(h_Warnings);
    }
    
-   assert(userProfile);
+   resip_assert(userProfile);
    if (msg->isRequest() 
        && userProfile->hasProxyRequires() 
        && msg->header(h_RequestLine).method() != ACK 
@@ -1067,7 +1074,7 @@ void DialogUsageManager::outgoingProcess(auto_ptr<Message> message)
             userProfile = ds->getUserProfile().get();
          }
 
-         assert(userProfile);
+         resip_assert(userProfile);
 
          //!dcm! -- unique SharedPtr to auto_ptr conversion prob. a worthwhile
          //optimzation here. SharedPtr would have to be changed; would
@@ -1311,7 +1318,7 @@ DialogUsageManager::internalProcess(std::auto_ptr<Message> msg)
    {
       // .bwc. Probably means multiple threads are trying to give DUM cycles 
       // simultaneously.
-      assert(!mHiddenThreadDebugKey);
+      resip_assert(!mHiddenThreadDebugKey);
       // No d'tor needed, since we're just going to use a pointer to this.
       if(!ThreadIf::tlsKeyCreate(mThreadDebugKey, 0))
       {
@@ -1340,8 +1347,8 @@ DialogUsageManager::internalProcess(std::auto_ptr<Message> msg)
       if (tuMsg)
       {
          InfoLog (<< "TU unregistered ");
-         assert(mShutdownState == RemovingTransactionUser);
-         assert(tuMsg->type() == TransactionUserMessage::TransactionUserRemoved);
+         resip_assert(mShutdownState == RemovingTransactionUser);
+         resip_assert(tuMsg->type() == TransactionUserMessage::TransactionUserRemoved);
          mShutdownState = Shutdown;
          if (mDumShutdownHandler)
          {
@@ -1564,8 +1571,16 @@ DialogUsageManager::incomingProcess(std::auto_ptr<Message> msg)
          }
          else
          {
-            assert(dynamic_cast<SipMessage*>(msg.get()));
-            it = mIncomingFeatureChainMap.insert(lb, FeatureChainMap::value_type(tid, new DumFeatureChain(*this, mIncomingFeatureList, *mIncomingTarget)));
+            if(dynamic_cast<SipMessage*>(msg.get()))
+            {
+               it = mIncomingFeatureChainMap.insert(lb, FeatureChainMap::value_type(tid, new DumFeatureChain(*this, mIncomingFeatureList, *mIncomingTarget)));
+            }
+            else
+            {
+               // Certain messages from the wire (ie: CANCEL) can end a feature, however there may still be some 
+               // pending Async requests (non-SipMessages) that are coming in - just drop them if so
+               return;
+            }
          }
       }
       
@@ -1588,7 +1603,7 @@ DialogUsageManager::incomingProcess(std::auto_ptr<Message> msg)
    
    try
    {
-      InfoLog (<< "Got: " << msg->brief());
+      DebugLog (<< "Got: " << msg->brief());
       DumDecrypted* decryptedMsg = dynamic_cast<DumDecrypted*>(msg.get());
       SipMessage* sipMsg = 0;
       if (decryptedMsg)
@@ -1621,7 +1636,7 @@ DialogUsageManager::incomingProcess(std::auto_ptr<Message> msg)
                   DebugLog (<< "Failed required options validation " << *sipMsg);
                   return;
                }
-               if( !validate100RelSuport(*sipMsg) )
+               if( !validate100RelSupport(*sipMsg) )
                {
                   DebugLog (<< "Remote party does not support 100rel " << *sipMsg);
                   return;
@@ -1656,7 +1671,7 @@ DialogUsageManager::incomingProcess(std::auto_ptr<Message> msg)
    catch(BaseException& e)
    {
       //unparseable, bad 403 w/ 2543 trans it from FWD, etc
-	  ErrLog(<<"Illegal message rejected: " << e.getMessage());
+     ErrLog(<<"Illegal message rejected: " << e.getMessage());
    }
 }
 
@@ -1767,8 +1782,8 @@ DialogUsageManager::validateRequiredOptions(const SipMessage& request)
 {
    // RFC 2162 - 8.2.2
    if(request.exists(h_Requires) &&                 // Don't check requires if method is ACK or CANCEL
-      (request.header(h_RequestLine).getMethod() != ACK ||
-       request.header(h_RequestLine).getMethod() != CANCEL))
+      request.header(h_RequestLine).getMethod() != ACK &&
+      request.header(h_RequestLine).getMethod() != CANCEL)
    {
       Tokens unsupported = getMasterProfile()->getUnsupportedOptionsTags(request.header(h_Requires));
       if (!unsupported.empty())
@@ -1792,7 +1807,7 @@ DialogUsageManager::validateRequiredOptions(const SipMessage& request)
 
 
 bool
-DialogUsageManager::validate100RelSuport(const SipMessage& request)
+DialogUsageManager::validate100RelSupport(const SipMessage& request)
 {
    if(request.header(h_RequestLine).getMethod() == INVITE)
    {
@@ -1807,7 +1822,9 @@ DialogUsageManager::validate100RelSuport(const SipMessage& request)
             sendResponse(failure);
       
             if(mRequestValidationHandler)
+            {
                mRequestValidationHandler->on100RelNotSupportedByRemote(request);
+            }
 
             return false;
          }
@@ -1923,8 +1940,8 @@ DialogUsageManager::validateAccept(const SipMessage& request)
 bool
 DialogUsageManager::mergeRequest(const SipMessage& request)
 {
-   assert(request.isRequest());
-   assert(request.isExternal());
+   resip_assert(request.isRequest());
+   resip_assert(request.isExternal());
 
    if (!request.header(h_To).exists(p_tag))
    {
@@ -1968,7 +1985,7 @@ DialogUsageManager::processRequest(const SipMessage& request)
        toTag = false;
    }
 
-   assert(mAppDialogSetFactory.get());
+   resip_assert(mAppDialogSetFactory.get());
    // !jf! note, the logic was reversed during ye great merge of March of Ought 5
    if (toTag ||
        findDialogSet(DialogSetId(request)))
@@ -2039,7 +2056,7 @@ DialogUsageManager::processRequest(const SipMessage& request)
             }
             else
             {
-               InfoLog (<< "Received a CANCEL on a non-existent transaction ");
+               InfoLog (<< "Received a CANCEL on a non-existent transaction: tid=" << request.getTransactionId());
                SipMessage failure;
                makeResponse(failure, request, 481);
                sendResponse(failure);
@@ -2047,8 +2064,8 @@ DialogUsageManager::processRequest(const SipMessage& request)
             break;
          }
          case PUBLISH:
-            assert(false);
-	    return;
+            resip_assert(false);
+            return;
          case SUBSCRIBE:
             if (!checkEventPackage(request))
             {
@@ -2056,7 +2073,7 @@ DialogUsageManager::processRequest(const SipMessage& request)
                         << request.brief());
                return;
             }
-	    /*FALLTHRU*/
+           /*FALLTHRU*/
          case NOTIFY : // handle unsolicited (illegal) NOTIFYs
          case INVITE:   // new INVITE
          case REFER:    // out-of-dialog REFER
@@ -2117,11 +2134,11 @@ DialogUsageManager::processRequest(const SipMessage& request)
          }
          case RESPONSE:
          case SERVICE:
-            assert(false);
+            resip_assert(false);
             break;
          case UNKNOWN:
          case MAX_METHODS:
-            assert(false);
+            resip_assert(false);
             break;
       }
    }
@@ -2139,9 +2156,9 @@ DialogUsageManager::processResponse(const SipMessage& response)
          DebugLog ( << "DialogUsageManager::processResponse: " << std::endl << std::endl << response.brief());
          ds->dispatch(response);
       }
-      else
+       else
       {
-		 InfoLog (<< "Throwing away stray response: " << std::endl << std::endl << response.brief());
+          InfoLog (<< "Throwing away stray response: " << std::endl << std::endl << response.brief());
       }
    }
 }
@@ -2164,9 +2181,22 @@ DialogUsageManager::processPublish(const SipMessage& request)
       }
       else
       {
-         SharedPtr<SipMessage> response(new SipMessage);
-         makeResponse(*response, request, 412);
-         send(response);
+         // Check if publication exists in PublicationDb - may have been sync'd over,
+         // or exists from a restart.  In this case, fabricate a new ServerSubcription 
+         // to handle this request.
+         if (mPublicationPersistenceManager &&
+             mPublicationPersistenceManager->documentExists(request.header(h_Event).value(), request.header(h_RequestLine).uri().getAor(), request.header(h_SIPIfMatch).value()))
+         {
+            ServerPublication* sp = new ServerPublication(*this, request.header(h_SIPIfMatch).value(), request);
+            mServerPublications[request.header(h_SIPIfMatch).value()] = sp;
+            sp->dispatch(request);
+         }
+         else
+         {
+            SharedPtr<SipMessage> response(new SipMessage);
+            makeResponse(*response, request, 412);
+            send(response);
+         }
       }
    }
    else
@@ -2235,7 +2265,7 @@ DialogUsageManager::checkEventPackage(const SipMessage& request)
             }
             break;
          default:
-            assert(0);
+            resip_assert(0);
       }
    }
 
@@ -2243,6 +2273,10 @@ DialogUsageManager::checkEventPackage(const SipMessage& request)
    {
       SharedPtr<SipMessage> response(new SipMessage);
       makeResponse(*response, request, failureCode);
+      if(failureCode == 489)
+      {
+         response->header(h_AllowEvents) = getMasterProfile()->getAllowedEvents();
+      }
       send(response);
       return false;
    }
@@ -2393,7 +2427,7 @@ DialogUsageManager::setOutgoingMessageInterceptor(SharedPtr<DumFeature> feat)
 void
 DialogUsageManager::applyToAllServerSubscriptions(ServerSubscriptionFunctor* functor)
 {
-   assert(functor);
+   resip_assert(functor);
    for (DialogSetMap::iterator it = mDialogSetMap.begin(); it != mDialogSetMap.end(); ++it)
    {
       for (DialogSet::DialogMap::iterator i = it->second->mDialogs.begin(); i != it->second->mDialogs.end(); ++i)
@@ -2410,7 +2444,7 @@ DialogUsageManager::applyToAllServerSubscriptions(ServerSubscriptionFunctor* fun
 void
 DialogUsageManager::applyToAllClientSubscriptions(ClientSubscriptionFunctor* functor)
 {
-   assert(functor);
+   resip_assert(functor);
    for (DialogSetMap::iterator it = mDialogSetMap.begin(); it != mDialogSetMap.end(); ++it)
    {
       for (DialogSet::DialogMap::iterator i = it->second->mDialogs.begin(); i != it->second->mDialogs.end(); ++i)
@@ -2421,6 +2455,32 @@ DialogUsageManager::applyToAllClientSubscriptions(ClientSubscriptionFunctor* fun
             functor->apply(*ics);
          }
       }
+   }
+}
+
+void 
+DialogUsageManager::endAllServerSubscriptions(TerminateReason reason)
+{
+   // Make a copy of the map - since calling end can cause an immediate delete this on the subscription and thus cause
+   // the object to remove itself from the mServerSubscriptions map, messing up our iterator
+   ServerSubscriptions tempSubscriptions = mServerSubscriptions;
+   ServerSubscriptions::iterator it = tempSubscriptions.begin();
+   for (; it != tempSubscriptions.end(); it++)
+   {
+      it->second->end(reason);
+   }
+}
+
+void 
+DialogUsageManager::endAllServerPublications()
+{
+   // Make a copy of the map - since calling end can cause an immediate delete this on the publication and thus cause
+   // the object to remove itself from the mServerPublications map, messing up our iterator
+   ServerPublications tempPublications = mServerPublications;
+   ServerPublications::iterator it = tempPublications.begin();
+   for (; it != tempPublications.end(); it++)
+   {
+      it->second->end();
    }
 }
 
@@ -2479,6 +2539,30 @@ DialogUsageManager::createDialogEventStateManager(DialogEventHandler* handler)
    return mDialogEventStateManager;
 }
 
+void 
+DialogUsageManager::setAdvertisedCapabilities(SipMessage& msg, SharedPtr<UserProfile> userProfile)
+{
+   if(userProfile->isAdvertisedCapability(Headers::Allow)) 
+   {
+      msg.header(h_Allows) = getMasterProfile()->getAllowedMethods();
+   }
+   if(userProfile->isAdvertisedCapability(Headers::AcceptEncoding)) 
+   {
+      msg.header(h_AcceptEncodings) = getMasterProfile()->getSupportedEncodings();
+   }
+   if(userProfile->isAdvertisedCapability(Headers::AcceptLanguage)) 
+   {
+      msg.header(h_AcceptLanguages) = getMasterProfile()->getSupportedLanguages();
+   }
+   if(userProfile->isAdvertisedCapability(Headers::AllowEvents)) 
+   {
+      msg.header(h_AllowEvents) = getMasterProfile()->getAllowedEvents();
+   }
+   if(userProfile->isAdvertisedCapability(Headers::Supported)) 
+   {
+      msg.header(h_Supporteds) = getMasterProfile()->getSupportedOptionTags();
+   }
+}
 
 /* ====================================================================
  * The Vovida Software License, Version 1.0

@@ -2,6 +2,7 @@
 #include "config.h"
 #endif
 
+#include "rutil/ResipAssert.h"
 #include "rutil/Socket.hxx"
 #include "rutil/Logger.hxx"
 #include "resip/stack/Connection.hxx"
@@ -13,6 +14,10 @@
 
 #ifdef USE_SSL
 #include "resip/stack/ssl/Security.hxx"
+#endif
+
+#ifdef WIN32
+#include <Mswsock.h>
 #endif
 
 #ifdef USE_SIGCOMP
@@ -27,18 +32,20 @@ volatile bool Connection::mEnablePostConnectSocketFuncCall = false;
 #define RESIPROCATE_SUBSYSTEM Subsystem::TRANSPORT
 
 Connection::Connection(Transport* transport,const Tuple& who, Socket socket,
-                       Compression &compression)
+                       Compression &compression,
+                       bool isServer)
    : ConnectionBase(transport,who,compression),
-     mRequestPostConnectSocketFuncCall(false),
+     mFirstWriteAfterConnectedPending(false),
      mInWritable(false),
      mFlowTimerEnabled(false),
-     mPollItemHandle(0)
+     mPollItemHandle(0),
+     mIsServer(isServer)
 {
    mWho.mFlowKey=(FlowKey)socket;
-   InfoLog (<< "Connection::Connection: new connection created to who: " << mWho);
+   InfoLog (<< "Connection::Connection: new connection created to who: " << mWho << ", is server = " << mIsServer);
 
-   if(transport && (transport->transport() == WS ||
-         transport->transport() == WSS)) {
+   if(transport && isWebSocket(transport->transport()))
+   {
       mSendingTransmissionFormat = WebSocketHandshake;
       mReceivingTransmissionFormat = WebSocketHandshake;
    }
@@ -77,7 +84,7 @@ Connection::removeFrontOutstandingSend()
 
    if (mOutstandingSends.empty())
    {
-      assert(mInWritable);
+      resip_assert(mInWritable);
       getConnectionManager().removeFromWritable(this);
       mInWritable = false;
    }
@@ -88,13 +95,35 @@ Connection::performWrite()
 {
    if(transportWrite())
    {
-      assert(mInWritable);
-      getConnectionManager().removeFromWritable(this);
-      mInWritable = false;
-      return 0; // What does this transportWrite() mean?
+      // If we get here it means:
+      // a. on a previous invocation, SSL_do_handshake wanted to write
+      //         (SSL_ERROR_WANT_WRITE)
+      // b. now the handshake is complete or it wants to read
+      if(mInWritable)
+      {
+         getConnectionManager().removeFromWritable(this);
+         mInWritable = false;
+      }
+      else
+      {
+         WarningLog(<<"performWrite invoked while not in write set");
+      }
+      return 0; // Q. What does this transportWrite() mean?
+                // A. It makes the TLS handshake move along after it
+                //    was waiting in the write set.
    }
 
-   assert(!mOutstandingSends.empty());
+   // If the TLS handshake returned SSL_ERROR_WANT_WRITE again
+   // then we could get here without really having something to write
+   // so just return, remaining in the write set.
+   if(mOutstandingSends.empty())
+   {
+      // FIXME: this needs to be more elaborate with respect
+      // to TLS handshaking but it doesn't appear we can do that
+      // without ABI breakage.
+      return 0;
+   }
+
    switch(mOutstandingSends.front()->command)
    {
    case SendData::CloseConnection:
@@ -151,30 +180,33 @@ Connection::performWrite()
             oldSd->transactionId,
             oldSd->sigcompId,
             false);
-      assert(dataWs && dataWs->data.data());
+      resip_assert(dataWs && dataWs->data.data());
       uBuffer = (UInt8*)dataWs->data.data();
 
       uBuffer[0] = 0x82;
-      if(lSize <= 0x7D){
+      if(lSize <= 0x7D)
+      {
          uBuffer[1] = (UInt8)lSize;
          uBuffer = &uBuffer[2];
       }
-      else if(lSize <= 0xFFFF){
+      else if(lSize <= 0xFFFF)
+      {
          uBuffer[1] = 0x7E;
-         uBuffer[2] = (lSize >> 8) & 0xFF;
-         uBuffer[3] = (lSize & 0xFF);
+         uBuffer[2] = (UInt8)((lSize >> 8) & 0xFF);
+         uBuffer[3] = (UInt8)(lSize & 0xFF);
          uBuffer = &uBuffer[4];
       }
-      else{
+      else
+      {
          uBuffer[1] = 0x7F;
-         uBuffer[2] = (lSize >> 56) & 0xFF;
-         uBuffer[3] = (lSize >> 48) & 0xFF;
-         uBuffer[4] = (lSize >> 40) & 0xFF;
-         uBuffer[5] = (lSize >> 32) & 0xFF;
-         uBuffer[6] = (lSize >> 24) & 0xFF;
-         uBuffer[7] = (lSize >> 16) & 0xFF;
-         uBuffer[8] = (lSize >> 8) & 0xFF;
-         uBuffer[9] = (lSize & 0xFF);
+         uBuffer[2] = (UInt8)((lSize >> 56) & 0xFF);
+         uBuffer[3] = (UInt8)((lSize >> 48) & 0xFF);
+         uBuffer[4] = (UInt8)((lSize >> 40) & 0xFF);
+         uBuffer[5] = (UInt8)((lSize >> 32) & 0xFF);
+         uBuffer[6] = (UInt8)((lSize >> 24) & 0xFF);
+         uBuffer[7] = (UInt8)((lSize >> 16) & 0xFF);
+         uBuffer[8] = (UInt8)((lSize >> 8) & 0xFF);
+         uBuffer[9] = (UInt8)(lSize & 0xFF);
          uBuffer = &uBuffer[10];
       }
 
@@ -211,31 +243,38 @@ Connection::performWrite()
    }
 #endif
 
-   if(mEnablePostConnectSocketFuncCall && mRequestPostConnectSocketFuncCall)
+   // Note:  The first time the socket is available for write, is when the TCP connect call is completed
+   if (mFirstWriteAfterConnectedPending)
    {
-       // Note:  The first time the socket is available for write, is when the TCP connect call is completed
-      mRequestPostConnectSocketFuncCall = false;
-      mTransport->callSocketFunc(getSocket());
+      mFirstWriteAfterConnectedPending = false;  // reset
+
+      // Notify all outstanding sends that we are now connected - stops the TCP Connection timer for all transactions
+      for (std::list<SendData*>::iterator it = mOutstandingSends.begin(); it != mOutstandingSends.end(); it++)
+      {
+         mTransport->setTcpConnectState((*it)->transactionId, TcpConnectState::Connected);
+      }
+      if (mEnablePostConnectSocketFuncCall)
+      {
+          mTransport->callSocketFunc(getSocket());
+      }
    }
 
    const Data& data = mOutstandingSends.front()->data;
-
    int nBytes = write(data.data() + mSendPos,int(data.size() - mSendPos));
 
    //DebugLog (<< "Tried to send " << data.size() - mSendPos << " bytes, sent " << nBytes << " bytes");
 
    if (nBytes < 0)
    {
-      if(errno!=EAGAIN)
-      {
-         //fail(data.transactionId);
-         InfoLog(<< "Write failed on socket: " << this->getSocket() << ", closing connection");
-         return -1;
-      }
-      else
-      {
-         return 0;
-      }
+      //fail(data.transactionId);
+      InfoLog(<< "Write failed on socket: " << this->getSocket() << ", closing connection");
+      return -1;
+   }
+   else if (nBytes == 0)
+   {
+      // Nothing was written - likely socket buffers are backed up and EWOULDBLOCK was returned
+      // no need to do calculations in else statement
+      return 0;
    }
    else
    {
@@ -273,7 +312,8 @@ Connection::ensureWritable()
 {
    if(!mInWritable)
    {
-      assert(!mOutstandingSends.empty());
+      //assert(!mOutstandingSends.empty()); // empty during TLS handshake
+      // therefore must be careful to check mOutstandingSends later
       getConnectionManager().addToWritable(this);
       mInWritable = true;
    }
@@ -301,7 +341,7 @@ Connection::read()
    size_t bytesToRead = resipMin(writePair.second, 
                                  static_cast<size_t>(Connection::ChunkSize));
          
-   assert(bytesToRead > 0);
+   resip_assert(bytesToRead > 0);
 
    int bytesRead = read(writePair.first, (int)bytesToRead);
    if (bytesRead <= 0)
@@ -441,6 +481,28 @@ Connection::isGood()
 }
 
 bool 
+Connection::checkConnectionTimedout()
+{
+   int errNum = 0;
+   int errNumSize = sizeof(errNum);
+   if(getsockopt(mWho.mFlowKey, SOL_SOCKET, SO_ERROR, (char *)&errNum, (socklen_t *)&errNumSize) == 0)
+   {
+      if (errNum == ETIMEDOUT || errNum == EHOSTUNREACH || errNum == ECONNREFUSED)
+      {
+         InfoLog(<< "Exception on socket " << mWho.mFlowKey << " code: " << errNum << "; closing connection");
+         setFailureReason(TransportFailure::ConnectionException, errNum);
+         delete this;
+         return true;
+      }
+      else if (errNum != 0)
+      {
+         WarningLog(<< "checkConnectionTimedout " << mWho.mFlowKey << " code: " << errNum << "; ignoring - should we error out?");
+      }
+   }
+   return false;
+}
+
+bool 
 Connection::isWritable()
 {
    return true;
@@ -477,6 +539,8 @@ Connection::processPollEvent(FdPollEventMask mask) {
       performReads();
    }
 }
+
+bool Connection::isServer()const{ return mIsServer; }
 
 /* ====================================================================
  * The Vovida Software License, Version 1.0 

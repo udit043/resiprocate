@@ -3,16 +3,19 @@
 EXTRA_DIST = Makefile.w32 make_w32.bat
 EXTRA_DIST += runtests.sh
 EXTRA_DIST += sweepRandom.sh
+EXTRA_DIST += testConfigParse-1.config
 
 #AM_CXXFLAGS = -DUSE_ARES
 AM_CXXFLAGS = -I $(top_srcdir)
 
 LDADD = ../librutil.la
 #LDADD += ../../contrib/ares/libares.a
-LDADD += $(LIBSSL_LIBADD) -lpthread
+LDADD += $(LIBSSL_LIBADD) @LIBSTL_LIBADD@ @LIBPTHREAD_LIBADD@
 
 TESTS = \
+	testCompat \
 	testCoders \
+	testConfigParse \
 	testCountStream \
 	testData \
 	testDataPerformance \
@@ -24,6 +27,7 @@ TESTS = \
 	testIntrusiveList \
 	testLogger \
 	testMD5Stream \
+	testNetNs \
 	testParseBuffer \
 	testRandomHex \
 	testRandomThread \
@@ -31,7 +35,9 @@ TESTS = \
 	testXMLCursor
 
 check_PROGRAMS = \
+	testCompat \
 	testCoders \
+	testConfigParse \
 	testCountStream \
 	testData \
 	testDataPerformance \
@@ -43,13 +49,16 @@ check_PROGRAMS = \
 	testIntrusiveList \
 	testLogger \
 	testMD5Stream \
+	testNetNs \
 	testParseBuffer \
 	testRandomHex \
 	testRandomThread \
 	testThreadIf \
 	testXMLCursor
 
+testCompat_SOURCES = testCompat.cxx
 testCoders_SOURCES = testCoders.cxx
+testConfigParse_SOURCES = testConfigParse.cxx
 testCountStream_SOURCES = testCountStream.cxx
 testData_SOURCES = testData.cxx
 testDataPerformance_SOURCES = testDataPerformance.cxx
@@ -61,6 +70,7 @@ testInserter_SOURCES = testInserter.cxx
 testIntrusiveList_SOURCES = testIntrusiveList.cxx
 testLogger_SOURCES = testLogger.cxx TestSubsystemLogLevel.cxx
 testMD5Stream_SOURCES = testMD5Stream.cxx
+testNetNs_SOURCES = testNetNs.cxx
 testParseBuffer_SOURCES = testParseBuffer.cxx
 testRandomHex_SOURCES = testRandomHex.cxx
 testRandomThread_SOURCES = testRandomThread.cxx

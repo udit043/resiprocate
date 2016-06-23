@@ -18,6 +18,7 @@
 #include "rutil/ServerProcess.hxx"
 #include "rutil/Log.hxx"
 #include "rutil/Logger.hxx"
+#include "rutil/Errdes.hxx"
 
 #define RESIPROCATE_SUBSYSTEM resip::Subsystem::SIP
 
@@ -40,7 +41,11 @@ ServerProcess::dropPrivileges(const Data& runAsUser, const Data& runAsGroup)
    throw std::runtime_error("Unable to drop privileges on Windows, please check the config");
 #else
    int rval;
-   int new_gid;
+   uid_t cur_uid;
+   gid_t cur_gid;
+   uid_t new_uid;
+   gid_t new_gid;
+   const char *username;
    struct passwd *pw;
    struct group *gr;
 
@@ -49,12 +54,14 @@ ServerProcess::dropPrivileges(const Data& runAsUser, const Data& runAsGroup)
       ErrLog(<<"Unable to drop privileges, username not specified");
       throw std::runtime_error("Unable to drop privileges, username not specified");
    }
-   pw = getpwnam(runAsUser.c_str());
+   username = runAsUser.c_str();
+   pw = getpwnam(username);
    if (pw == NULL)
    {
       ErrLog(<<"Unable to drop privileges, user not found");
       throw std::runtime_error("Unable to drop privileges, user not found");
    }
+   new_uid = pw->pw_uid;
 
    if(!runAsGroup.empty())
    {
@@ -72,10 +79,10 @@ ServerProcess::dropPrivileges(const Data& runAsUser, const Data& runAsGroup)
       new_gid = pw->pw_gid;
    }
 
-   rval = getgid();
-   if (rval != new_gid)
+   cur_gid = getgid();
+   if (cur_gid != new_gid)
    {
-      if (rval != 0)
+      if (cur_gid != 0)
       {
          ErrLog(<<"Unable to drop privileges, not root!");
          throw std::runtime_error("Unable to drop privileges, not root!");
@@ -84,27 +91,99 @@ ServerProcess::dropPrivileges(const Data& runAsUser, const Data& runAsGroup)
       rval = setgid(new_gid);
       if (rval < 0)
       {
-         ErrLog(<<"Unable to drop privileges, operation failed");
+         ErrLog(<<"Unable to drop privileges, operation failed (setgid)");
          throw std::runtime_error("Unable to drop privileges, operation failed");
       }
    }
 
-   rval = getuid();
-   if (rval != pw->pw_uid)
+   if(initgroups(username, new_gid) < 0)
    {
-      if (rval != 0)
+      ErrLog(<<"Unable to drop privileges, operation failed (initgroups)");
+      throw std::runtime_error("Unable to drop privileges, operation failed");
+   }
+
+   cur_uid = getuid();
+   if (cur_uid != new_uid)
+   {
+      if (cur_uid != 0)
       {
          ErrLog(<<"Unable to drop privileges, not root!");
          throw std::runtime_error("Unable to drop privileges, not root!");
       }
 
-      rval = setuid(pw->pw_uid);
+      // If logging to file, the file ownership may be root and needs to
+      // be changed
+      Log::droppingPrivileges(new_uid, new_gid);
+      if(mPidFile.size() > 0)
+      {
+         if(chown(mPidFile.c_str(), new_uid, new_gid) < 0)
+         {
+            ErrLog(<<"Failed to change ownership of PID file");
+         }
+      }
+
+      rval = setuid(new_uid);
       if (rval < 0)
       {
-         ErrLog(<<"Unable to drop privileges, operation failed");
+         ErrLog(<<"Unable to drop privileges, operation failed (setuid)");
          throw std::runtime_error("Unable to drop privileges, operation failed");
       }
    }
+#endif
+}
+
+bool
+ServerProcess::isAlreadyRunning()
+{
+#ifndef __linux__
+   //WarningLog(<<"can't check if process already running on this platform (not implemented yet)");
+   return false;
+#else
+   if(mPidFile.size() == 0)
+   {
+      // if no PID file specified, we do not make any check
+      return false;
+   }
+
+   pid_t running_pid;
+   std::ifstream _pid(mPidFile.c_str(), std::ios_base::in);
+   if(!_pid.good())
+   {
+      // if the file doesn't exist or can't be opened, just ignore
+      return false;
+   }
+   _pid >> running_pid;
+   _pid.close();
+
+   StackLog(<< mPidFile << " contains PID " << running_pid);
+
+   Data ourProc = Data("/proc/self/exe");
+   Data otherProc = Data("/proc/") + Data(running_pid) + Data("/exe");
+   char our_exe[513], other_exe[513];
+   int buf_size;
+
+   buf_size = readlink(ourProc.c_str(), our_exe, 512);
+   if(buf_size < 0 || buf_size == 512)
+   {
+      // if readlink fails, just ignore
+      return false;
+   }
+   our_exe[buf_size] = 0;
+
+   buf_size = readlink(otherProc.c_str(), other_exe, 512);
+   if(buf_size < 0 || buf_size == 512)
+   {
+      // if readlink fails, just ignore
+      return false;
+   }
+   other_exe[buf_size] = 0;
+
+   if(strcmp(our_exe, other_exe) == 0)
+   {
+      ErrLog(<<"already running PID: " << running_pid);
+      return true;
+   }
+   return false;
 #endif
 }
 
@@ -120,7 +199,7 @@ ServerProcess::daemonize()
    if ((pid = fork()) < 0) 
    {
       // fork() failed
-      ErrLog(<<"fork() failed: "<<strerror(errno));
+      ErrLog(<<"fork() failed: "<<errortostringOS(errno));
       throw std::runtime_error(strerror(errno));
    }
    else if (pid != 0)
@@ -130,7 +209,7 @@ ServerProcess::daemonize()
    }
    if(chdir("/") < 0)
    {
-      ErrLog(<<"chdir() failed: "<<strerror(errno));
+      ErrLog(<<"chdir() failed: "<<errortostringOS(errno));
       throw std::runtime_error(strerror(errno));
    }
    // Nothing should be writing to stdout/stderr after this

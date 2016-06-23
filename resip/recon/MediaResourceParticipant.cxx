@@ -26,6 +26,7 @@ using namespace std;
 
 static const resip::ExtensionParameter p_localonly("local-only");
 static const resip::ExtensionParameter p_remoteonly("remote-only");
+static const resip::ExtensionParameter p_participantonly("participant-only");
 static const resip::ExtensionParameter p_repeat("repeat");
 static const resip::ExtensionParameter p_prefetch("prefetch");
 
@@ -60,7 +61,7 @@ class MediaResourceParticipantDeleterCmd : public DumCommand
 
       void executeCommand() { Participant* participant = mConversationManager.getParticipant(mParticipantHandle); if(participant) delete participant; }
 
-      Message* clone() const { assert(0); return 0; }
+      Message* clone() const { resip_assert(0); return 0; }
       EncodeStream& encode(EncodeStream& strm) const { strm << "MediaResourceParticipantDeleterCmd: partHandle=" << mParticipantHandle; return strm; }
       EncodeStream& encodeBrief(EncodeStream& strm) const { return encode(strm); }
       
@@ -145,7 +146,7 @@ MediaResourceParticipant::~MediaResourceParticipant()
 void 
 MediaResourceParticipant::startPlay()
 {
-   assert(!mPlaying);
+   resip_assert(!mPlaying);
    try
    {
       InfoLog(<< "MediaResourceParticipant playing, handle=" << mHandle << " url=" << mMediaUrl);
@@ -182,9 +183,11 @@ MediaResourceParticipant::startPlay()
       case Tone:
       {
          int toneid;
+         bool isDtmf = false;
          if(mMediaUrl.host().size() == 1)
          {
             toneid = mMediaUrl.host().at(0);
+            isDtmf = true;
          }
          else
          {
@@ -204,7 +207,28 @@ MediaResourceParticipant::startPlay()
             }
          }
 
-         OsStatus status = getMediaInterface()->getInterface()->startTone(toneid, mRemoteOnly ? FALSE : TRUE /* local */, mLocalOnly ? FALSE : TRUE /* remote */);
+         OsStatus status = OS_FAILED;
+         if(mMediaUrl.exists(p_participantonly))
+         {
+            int partHandle = mMediaUrl.param(p_participantonly).convertInt();
+            RemoteParticipant* participant = dynamic_cast<RemoteParticipant*>(mConversationManager.getParticipant(partHandle));
+            if(participant)
+            {
+               StackLog(<<"sending tone to sipX connection: " << participant->getMediaConnectionId());
+               // this uses the original API, where both inband and RFC2833 tones are always sent simultaneously:
+               status = getMediaInterface()->getInterface()->startChannelTone(participant->getMediaConnectionId(), toneid, mRemoteOnly ? FALSE : TRUE /* local */, mLocalOnly ? FALSE : TRUE /* remote */);
+               // this is for newer sipXtapi API, option to suppress inband tones:
+               //status = getMediaInterface()->getInterface()->startChannelTone(participant->getMediaConnectionId(), toneid, mRemoteOnly ? FALSE : TRUE /* local */, mLocalOnly ? FALSE : TRUE /* remote */, !isDtmf /* inband */, true /* RFC 4733 */);
+            }
+            else
+            {
+               WarningLog(<<"Participant " << partHandle << " no longer exists or invalid");
+            }
+         }
+         else
+         {
+            status = getMediaInterface()->getInterface()->startTone(toneid, mRemoteOnly ? FALSE : TRUE /* local */, mLocalOnly ? FALSE : TRUE /* remote */);
+         }
          if(status == OS_SUCCESS)
          {
             mPlaying = true;
@@ -349,7 +373,7 @@ MediaResourceParticipant::getConnectionPortOnBridge()
    case Tone:     
       if(mToneGenPortOnBridge == -1)
       {
-         assert(getMediaInterface() != 0);     
+         resip_assert(getMediaInterface() != 0);     
          ((CpTopologyGraphInterface*)getMediaInterface()->getInterface())->getResourceInputPortOnBridge(DEFAULT_TONE_GEN_RESOURCE_NAME,0,mToneGenPortOnBridge);
          InfoLog(<< "MediaResourceParticipant getConnectionPortOnBridge, handle=" << mHandle << ", mToneGenPortOnBridge=" << mToneGenPortOnBridge);
       }
@@ -361,7 +385,7 @@ MediaResourceParticipant::getConnectionPortOnBridge()
    case Https:
       if(mFromFilePortOnBridge == -1)
       {
-         assert(getMediaInterface() != 0);     
+         resip_assert(getMediaInterface() != 0);     
          ((CpTopologyGraphInterface*)getMediaInterface()->getInterface())->getResourceInputPortOnBridge(DEFAULT_FROM_FILE_RESOURCE_NAME,0,mFromFilePortOnBridge);
          InfoLog(<< "MediaResourceParticipant getConnectionPortOnBridge, handle=" << mHandle << ", mFromFilePortOnBridge=" << mFromFilePortOnBridge);
       }
@@ -388,7 +412,28 @@ MediaResourceParticipant::destroyParticipant()
       {
       case Tone:
          {
-            OsStatus status = getMediaInterface()->getInterface()->stopTone();
+            OsStatus status = OS_FAILED;
+            if(mMediaUrl.exists(p_participantonly))
+            {
+               bool isDtmf = (mMediaUrl.host().size() == 1);
+               int partHandle = mMediaUrl.param(p_participantonly).convertInt();
+               RemoteParticipant* participant = dynamic_cast<RemoteParticipant*>(mConversationManager.getParticipant(partHandle));
+               if(participant)
+               {
+                  // this uses the original API, where both inband and RFC2833 tones are always sent simultaneously:
+                  status = getMediaInterface()->getInterface()->stopChannelTone(participant->getMediaConnectionId());
+                  // this is for newer sipXtapi API, option to suppress inband tones:
+                  //status = getMediaInterface()->getInterface()->stopChannelTone(participant->getMediaConnectionId(), !isDtmf, true);
+               }
+               else
+               {
+                  WarningLog(<<"Participant " << partHandle << " no longer exists or invalid");
+               }
+            }
+            else
+            {
+               status = getMediaInterface()->getInterface()->stopTone();
+            }
             if(status != OS_SUCCESS)
             {
                WarningLog(<< "MediaResourceParticipant::destroyParticipant error calling stopTone: " << status);

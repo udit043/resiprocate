@@ -163,25 +163,31 @@ class Log
          return mAppName;
       }
 
+      static int parseSyslogFacilityName(const Data& facilityName);
+
       static void initialize(Type type,
                              Level level,
                              const Data& appName,
                              const char * logFileName = 0,
-                             ExternalLogger* externalLogger = 0);
+                             ExternalLogger* externalLogger = 0,
+                             const Data& syslogFacility = "LOG_DAEMON");
       static void initialize(const Data& type,
                              const Data& level,
                              const Data& appName,
                              const char * logFileName = 0,
-                             ExternalLogger* externalLogger = 0);
+                             ExternalLogger* externalLogger = 0,
+                             const Data& syslogFacility = "LOG_DAEMON");
       static void initialize(const char* type,
                              const char* level,
                              const char* appName,
                              const char * logFileName = 0,
-                             ExternalLogger* externalLogger = 0);
+                             ExternalLogger* externalLogger = 0,
+                             const char* syslogFacility = "LOG_DAEMON");
       static void initialize(Type type,
                              Level level,
                              const Data& appName,
-                             ExternalLogger& logger);
+                             ExternalLogger& logger,
+                             const Data& syslogFacility = "LOG_DAEMON");
 
       /** @brief Set logging level for current thread.
       * If thread has no local logger attached, then set global logging level.
@@ -253,6 +259,9 @@ class Log
       static bool isLogging(Log::Level level, const Subsystem&);
       static void OutputToWin32DebugWindow(const Data& result);      
       static void reset(); ///< Frees logger stream
+#ifndef WIN32
+      static void droppingPrivileges(uid_t uid, pid_t pid);
+#endif
 
    public:
       static unsigned int MaxLineCount; 
@@ -306,6 +315,9 @@ class Log
 
             std::ostream& Instance(unsigned int bytesToWrite); ///< Return logger stream instance, creating it if needed.
             void reset(); ///< Frees logger stream
+#ifndef WIN32
+            void droppingPrivileges(uid_t uid, pid_t pid);
+#endif
 
             volatile Level mLevel;
             volatile unsigned int mMaxLineCount;
@@ -324,6 +336,7 @@ class Log
       static ThreadData mDefaultLoggerData; ///< Default logger settings.
       static Data mAppName;
       static Data mHostname;
+      static int mSyslogFacility;
 #ifndef WIN32
       static pid_t mPid;
 #else   

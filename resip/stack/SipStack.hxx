@@ -15,10 +15,14 @@
 #include "rutil/TransportType.hxx"
 #include "rutil/BaseException.hxx"
 #include "resip/stack/TransactionController.hxx"
+#include "resip/stack/TransportSelector.hxx"
 #include "resip/stack/SecurityTypes.hxx"
 #include "resip/stack/StatisticsManager.hxx"
 #include "resip/stack/TuSelector.hxx"
+#include "resip/stack/WsConnectionValidator.hxx"
+#include "resip/stack/WsCookieContextFactory.hxx"
 #include "rutil/dns/DnsStub.hxx"
+#include "rutil/SharedPtr.hxx"
 
 /**
     Let external applications know that this version of the stack
@@ -261,6 +265,20 @@ class SipStack : public FdSetIOObserver
       };
 
       /**
+         Used by the application to provide a handler that will get called for all
+         inbound and outbound SIP messages on transports that are added after calling this.
+
+         @note                        If you want a custom handler per transport then
+                                      you can call setSipMessageLoggingHandler on the
+                                      Transport pointer returned from addTransport
+
+         @param handler               SharedPtr to a handler to call for inbound and
+                                      outbound SIP messages for all transports added
+                                      after calling this.
+      */
+      void setTransportSipMessageLoggingHandler(SharedPtr<Transport::SipMessageLoggingHandler> handler) { mTransportSipMessageLoggingHandler = handler; }
+
+      /**
          Used by the application to add in a new built-in transport.  The transport is
          created and then added to the Transport Selector.
 
@@ -300,20 +318,27 @@ class SipStack : public FdSetIOObserver
                                       because many commercial CAs offer email certificates but not
                                       sip: certificates.  For reasons of standards compliance, it
                                       is disabled by default.
+
+         @param netNs                 Set the network namespace (netns) in which the Transport is
+                                      to bind the the given address and port.
+
       */
-      Transport* addTransport( TransportType protocol,
-                         int port,
-                         IpVersion version=V4,
-                         StunSetting stun=StunDisabled,
-                         const Data& ipInterface = Data::Empty,
-                         const Data& sipDomainname = Data::Empty, // only used
-                                                                  // for TLS
-                                                                  // based stuff
-                         const Data& privateKeyPassPhrase = Data::Empty,
-                         SecurityTypes::SSLType sslType = SecurityTypes::TLSv1,
-                         unsigned transportFlags = 0,
-                         SecurityTypes::TlsClientVerificationMode cvm = SecurityTypes::None,
-                         bool useEmailAsSIP = false);
+      Transport* addTransport(TransportType protocol,
+                              int port,
+                              IpVersion version=V4,
+                              StunSetting stun=StunDisabled,
+                              const Data& ipInterface = Data::Empty,
+                              const Data& sipDomainname = Data::Empty, // only used for TLS based stuff
+                              const Data& privateKeyPassPhrase = Data::Empty,
+                              SecurityTypes::SSLType sslType = SecurityTypes::TLSv1,
+                              unsigned transportFlags = 0,
+                              const Data& certificateFilename = "", const Data& privateKeyFilename = "",
+                              SecurityTypes::TlsClientVerificationMode cvm = SecurityTypes::None,
+                              bool useEmailAsSIP = false,
+                              SharedPtr<WsConnectionValidator> = SharedPtr<WsConnectionValidator>(),
+                              SharedPtr<WsCookieContextFactory> = SharedPtr<WsCookieContextFactory>(),
+                              const Data& netns = Data::Empty
+                             );
 
       /**
           Used to plug-in custom transports.  Adds the transport to the Transport
@@ -322,7 +347,15 @@ class SipStack : public FdSetIOObserver
           @param transport Pointer to an externally created transport.  SipStack
                            assumes ownership.
       */
-      void addTransport( std::auto_ptr<Transport> transport);
+      void addTransport(std::auto_ptr<Transport> transport);
+
+      /**
+          Used to remove a previously added transport.
+
+          @param transportKey The key for the transpor to remove.  Use Transport::getKey 
+                 to get the key of a transport after it is added to the stack.
+      */      
+      void removeTransport(unsigned int transportKey);
 
       /**
           Returns the fifo that subclasses of Transport should use for the rxFifo
@@ -336,7 +369,7 @@ class SipStack : public FdSetIOObserver
           @brief add an alias for this sip element
           
           @details Used to add an alias for this sip element. e.g. foobar.com and boo.com
-          are both handled by this stack.  Not threadsafe.  Alias is added 
+          are both handled by this stack.  Alias is added 
           to internal list of Domains and can be checked with isMyDomain.
 
           @param domain   Domain name that this stack is responsible for.
@@ -345,6 +378,19 @@ class SipStack : public FdSetIOObserver
           @ingroup resip_config
       */
       void addAlias(const Data& domain, int port);
+
+      /**
+          @brief removes an alias from this sip element
+          
+          @details Used to remove an existing alias from this sip element.
+          Only removed if reference count hits 0.
+
+          @param domain   Domain name that this stack is responsible for.
+
+          @param port     Port for domain that this stack is responsible for.
+          @ingroup resip_config
+      */
+      void removeAlias(const Data& domain, int port);
 
       /**
           Returns true if domain is handled by this stack.  Convenience for
@@ -725,7 +771,6 @@ class SipStack : public FdSetIOObserver
       */
       virtual void processTimers();
 
-
       /**
          @brief Sets the interval that determines the time between Statistics messages
          @ingroup resip_config
@@ -751,6 +796,9 @@ class SipStack : public FdSetIOObserver
       {
          mStatsManager.setExternalStatsHandler(handler);
       }
+
+      /** @brief get statistics manager **/
+      const StatisticsManager* getStatisticsManager() {return(&mStatsManager);}
 
       /** @brief output current state of the stack - for debug **/
       EncodeStream& dump(EncodeStream& strm) const;
@@ -889,6 +937,16 @@ class SipStack : public FdSetIOObserver
       inline void setFixBadCSeqNumbers(bool pFixBadCSeqNumbers)
       {
          mTransactionController->setFixBadCSeqNumbers(pFixBadCSeqNumbers);
+      }
+
+      bool setUdpOnlyOnNumeric(bool value)
+      {
+         return mTransactionController->transportSelector().setUdpOnlyOnNumeric(value);
+      }
+
+      bool getUdpOnlyOnNumeric() const
+      {
+         return mTransactionController->transportSelector().getUdpOnlyOnNumeric();
       }
 
       /**
@@ -1054,22 +1112,40 @@ class SipStack : public FdSetIOObserver
 
       TransactionControllerThread* mTransactionControllerThread;
       TransportSelectorThread* mTransportSelectorThread;
-      bool mRunning;
+      bool mInternalThreadsRunning;
+      bool mProcessingHasStarted; 
+
       /** @brief store all domains that this stack is responsible for.
           @note Controlled by addAlias and addTransport interface
           and checks can be made with isMyDomain() */
-      std::set<Data> mDomains;
+      typedef std::map<Data, unsigned int> DomainsMap;
+      DomainsMap mDomains;  // Second item (unsigned int) is for reference counting
+      Uri mUri;
+      mutable Mutex mDomainsMutex;  // Protects both mDomains and mUri, since they are related
 
       /** store all ports that this stack is lisenting on.  Controlled by addTransport
           and checks can be made with isMyPort() */
-      std::set<int> mPorts;
+      std::map<int, unsigned int> mPorts;  // Second item (unsigned int) is for reference counting
+      mutable Mutex mPortsMutex;
 
-      Uri mUri;
+      // Used to ensure new Transport additions will always succeed without needing to ask 
+      // TransportSelector if add will be valid and introduce locking
+      // Note:  We could add a Mutex here and add thread safe accesor methods to transport pointers 
+      //        as a convience to API users
+      typedef std::map<Tuple, Transport*> NonSecureTransportMap;
+      NonSecureTransportMap mNonSecureTransports;
+      typedef std::map<TransportSelector::TlsTransportKey, Transport*> SecureTransportMap;
+      SecureTransportMap mSecureTransports;
+
       bool mShuttingDown;
       mutable Mutex mShutdownMutex;
       volatile bool mStatisticsManagerEnabled;
 
       AfterSocketCreationFuncPtr mSocketFunc;
+
+      unsigned int mNextTransportKey;
+
+      SharedPtr<Transport::SipMessageLoggingHandler> mTransportSipMessageLoggingHandler;
 
       friend class Executive;
       friend class StatelessHandler;
@@ -1087,7 +1163,7 @@ inline void
 SipStack::sendOverExistingConnection(const SipMessage& msg, const Tuple& tuple,
                                      TransactionUser* tu)
 {
-   assert(tuple.mFlowKey);
+   resip_assert(tuple.mFlowKey);
    Tuple tup(tuple);
    tup.onlyUseExistingConnection = true;
    sendTo(msg, tuple, tu);

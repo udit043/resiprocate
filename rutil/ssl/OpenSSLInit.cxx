@@ -19,6 +19,15 @@
 #define OPENSSL_THREAD_DEFINES
 #include <openssl/opensslconf.h>
 
+#if  defined(WIN32) && defined(_MSC_VER) && (_MSC_VER >= 1900)
+// OpenSSL builds use an older version of visual studio that require the following definition
+// Also will need to link with legacy_stdio_definitions.lib.  It's possible that future build of 
+// SL's windows OpenSSL binaries will be built with VS2015 and will not require this, however it shouldn't
+// hurt to be here.
+// http://stackoverflow.com/questions/30412951/unresolved-external-symbol-imp-fprintf-and-imp-iob-func-sdl2
+extern "C" { FILE __iob_func[3] = { *stdin,*stdout,*stderr }; }
+#endif
+
 #define RESIPROCATE_SUBSYSTEM Subsystem::SIP
 
 using namespace resip;
@@ -64,20 +73,19 @@ OpenSSLInit::OpenSSLInit()
 	SSL_library_init();
 	SSL_load_error_strings();
 	OpenSSL_add_all_algorithms();
-	assert(EVP_des_ede3_cbc());
+	resip_assert(EVP_des_ede3_cbc());
    mInitialized = true;
 }
 
 OpenSSLInit::~OpenSSLInit()
 {
    mInitialized = false;
-	ERR_free_strings();// Clean up data allocated during SSL_load_error_strings
-	ERR_remove_state(0);// free thread error queue
-	CRYPTO_cleanup_all_ex_data();
-	EVP_cleanup();// Clean up data allocated during OpenSSL_add_all_algorithms
+   ERR_remove_state(0);// free thread error queue
+   EVP_cleanup();// Clean up data allocated during OpenSSL_add_all_algorithms
+   CRYPTO_cleanup_all_ex_data();
+   ERR_free_strings();// Clean up data allocated during SSL_load_error_strings
+   sk_SSL_COMP_free (SSL_COMP_get_compression_methods()); 
 
-    //!dcm! We know we have a leak; see BaseSecurity::~BaseSecurity for
-    //!details.
 //	CRYPTO_mem_leaks_fp(stderr);
 
 	delete [] mMutexes;
@@ -101,10 +109,10 @@ unsigned long
 resip_OpenSSLInit_threadIdFunction()
 {
 #if defined(WIN32)
-   assert(0);
+   resip_assert(0);
 #else
 #ifndef _POSIX_THREADS
-   assert(0);
+   resip_assert(0);
 #endif
    unsigned long ret;
    ret= (unsigned long)pthread_self();

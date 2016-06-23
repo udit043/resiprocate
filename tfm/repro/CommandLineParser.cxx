@@ -15,6 +15,7 @@ CommandLineParser::CommandLineParser(int argc, char** argv)
 {
    const char* logType = "file";
    const char* logLevel = "INFO";
+   int interactive = 0;
    const char* tlsDomain = 0;
    const char* proxyHostName=0;
    const char* userIPAddr=0;
@@ -27,7 +28,7 @@ CommandLineParser::CommandLineParser(int argc, char** argv)
    const char* dtlsPorts = 0;
    int noV4 = 0;
    int noV6 = 0;
-   int threadedStack = 0;
+   int disableThreadedStack = 0;
    int useCongestionManager = 0;
    const char* certPath = 0;
    int noChallenge = 0;
@@ -63,6 +64,7 @@ CommandLineParser::CommandLineParser(int argc, char** argv)
    struct poptOption table[] = {
       {"log-type",     'l',  POPT_ARG_STRING| POPT_ARGFLAG_SHOW_DEFAULT, &logType,   0, "where to send logging messages", "syslog|cerr|cout"},
       {"log-level",    'v',  POPT_ARG_STRING| POPT_ARGFLAG_SHOW_DEFAULT, &logLevel,  0, "specify the default log level", "DEBUG|INFO|WARN|ERROR|FATAL"},
+      {"interactive",  'i',  POPT_ARG_NONE,   &interactive, 0, "enable interactive test mode", 0},
       {"record-route",  'r',  POPT_ARG_STRING, &recordRoute,  0, "specify uri to use as Record-Route", "sip:example.com"},
       {"enable-flow-tokens",  'f',  POPT_ARG_NONE, &flowTokens,  0, "enable flow token hack", 0},
       {"tls-domain",   't',  POPT_ARG_STRING, &tlsDomain,  0, "act as a TLS server for specified domain", "example.com"},
@@ -76,7 +78,7 @@ CommandLineParser::CommandLineParser(int argc, char** argv)
       {"dtls",           0,  POPT_ARG_STRING | POPT_ARGFLAG_SHOW_DEFAULT,    &dtlsPorts, 0, "add DTLS transport on specified port/s", "none (dtls disabled)"},
       {"disable-v6",   0,   POPT_ARG_NONE, &noV6, 0, "disable IPV6", 0},
       {"disable-v4",   0,   POPT_ARG_NONE, &noV4, 0, "disable IPV4", 0},
-      {"threaded-stack",   0,   POPT_ARG_NONE, &threadedStack, 0, "enable multithreaded stack", 0},
+      {"disable-threaded-stack",   0,   POPT_ARG_NONE, &disableThreadedStack, 0, "disable multithreaded stack", 0},
       {"use-congestion-manager",   0,   POPT_ARG_NONE, &useCongestionManager, 0, "enable congestion manager", 0},
       {"disable-auth",   0,  POPT_ARG_NONE,   &noChallenge, 0, "disable DIGEST challenges", 0},
       {"disable-web-auth",0, POPT_ARG_NONE,   &noWebChallenge, 0, "disable HTTP challenges", 0},
@@ -111,6 +113,8 @@ CommandLineParser::CommandLineParser(int argc, char** argv)
    mHttpPort = httpPort;
    mLogType = logType;
    mLogLevel = logLevel;
+   mInteractive = interactive != 0;
+
    //Log::initialize(mLogType, mLogLevel, argv[0]);
 
    if (tlsDomain) 
@@ -142,14 +146,14 @@ CommandLineParser::CommandLineParser(int argc, char** argv)
    mDtlsPorts = toIntSet(dtlsPorts, "dtls ports");
    mNoV4 = noV4 != 0;
    mNoV6 = noV6 != 0;
-   mThreadedStack = threadedStack != 0;
+   mThreadedStack = disableThreadedStack == 0;
    mUseCongestionManager = useCongestionManager != 0;
    if (certPath) mCertPath = certPath;
    else mCertPath = basePath + "/.sipCerts";
    mNoChallenge = noChallenge != 0;
    mNoWebChallenge = noWebChallenge != 0;
    mNoRegistrar = noRegistrar != 0 ;
-   mCertServer = noCertServer==0 ;
+   mCertServer = noCertServer == 0 ;
    mRequestProcessorChainName=reqChainName;
 
    if (enumSuffix) mEnumSuffix = enumSuffix;

@@ -52,6 +52,8 @@ class Symbols
       static const char* TLS;
       static const char* DTLS;
       static const char* SCTP;
+      static const char* WS;
+      static const char* WSS;
       static const char* SRVUDP;
       static const char* SRVTCP;
       static const char* SRVTLS;
@@ -73,6 +75,7 @@ class Symbols
       
       static const char * const MagicCookie;
       static const char * const resipCookie;
+      static const char * const WebsocketMagicGUID;
 
       static const int DefaultSipPort;
       static const int SipTlsPort;
@@ -122,6 +125,11 @@ class Symbols
       static const char* id;
 
       static const char* Gruu;
+
+      static const char* Uui; // from draft-ietf-cuss-sip-uui-17
+      static const char* Hex; // from draft-ietf-cuss-sip-uui-17
+      static const char* IsdnInterwork; // from draft-johnston-sipping-cc-uui-09
+      static const char* IsdnUui; // from draft-johnston-sipping-cc-uui-09
 };
 
 }

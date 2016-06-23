@@ -69,7 +69,7 @@ ResponseContext::addTarget(const NameAddr& addr, bool beginImmediately)
 }
 
 bool
-ResponseContext::addTarget(std::auto_ptr<repro::Target> target, bool beginImmediately)
+ResponseContext::addTarget(std::auto_ptr<repro::Target> target, bool beginImmediately, bool checkDuplicates)
 {
    if(mRequestContext.mHaveSentFinalResponse || !target.get())
    {
@@ -90,7 +90,7 @@ ResponseContext::addTarget(std::auto_ptr<repro::Target> target, bool beginImmedi
    
    if(beginImmediately)
    {
-      if(isDuplicate(target.get()))
+      if (checkDuplicates && isDuplicate(target.get()))
       {
          return false;
       }
@@ -344,21 +344,21 @@ ResponseContext::getTarget(const resip::Data& tid) const
    TransactionMap::const_iterator pend = mCandidateTransactionMap.find(tid);
    if(pend != mCandidateTransactionMap.end())
    {
-      assert(pend->second->status()==Target::Candidate);
+      resip_assert(pend->second->status()==Target::Candidate);
       return pend->second;
    }
    
    TransactionMap::const_iterator act = mActiveTransactionMap.find(tid);
    if(act != mActiveTransactionMap.end())
    {
-      assert(!(act->second->status()==Target::Candidate || act->second->status()==Target::Terminated));
+      resip_assert(!(act->second->status()==Target::Candidate || act->second->status()==Target::Terminated));
       return act->second;
    }
 
    TransactionMap::const_iterator term = mTerminatedTransactionMap.find(tid);
    if(term != mTerminatedTransactionMap.end())
    {
-      assert(term->second->status()==Target::Terminated);
+      resip_assert(term->second->status()==Target::Terminated);
       return term->second;
    }
 
@@ -488,7 +488,7 @@ ResponseContext::beginClientTransaction(repro::Target* target)
 {
    // .bwc. This is a private function, and if anything calls this with a
    // target in an invalid state, it is a bug.
-   assert(target->status() == Target::Candidate);
+   resip_assert(target->status() == Target::Candidate);
 
    SipMessage& orig=mRequestContext.getOriginalRequest();
    SipMessage request(orig);
@@ -523,7 +523,8 @@ ResponseContext::beginClientTransaction(repro::Target* target)
    // stuff.
 
    // only add record route if configured to do so
-   if(!mRequestContext.mProxy.getRecordRoute(orig.getReceivedTransport()).uri().host().empty())
+   const NameAddr& receivedTransportRecordRoute = mRequestContext.mProxy.getRecordRoute(orig.getSource().mTransportKey);
+   if(!receivedTransportRecordRoute.uri().host().empty())
    {
       if (!inDialog &&  // only for dialog-creating request
           (request.method() == INVITE ||
@@ -531,13 +532,15 @@ ResponseContext::beginClientTransaction(repro::Target* target)
            request.method() == REFER))
       {
          insertRecordRoute(request,
-                           orig.getReceivedTransport(),
+                           orig.getReceivedTransportTuple(),
+                           receivedTransportRecordRoute,
                            target);
       }
       else if(request.method()==REGISTER)
       {
          insertRecordRoute(request,
-                           orig.getReceivedTransport(),
+                           orig.getReceivedTransportTuple(),
+                           receivedTransportRecordRoute,
                            target,
                            true /* do Path instead */);
       }
@@ -591,7 +594,8 @@ ResponseContext::beginClientTransaction(repro::Target* target)
 
 void
 ResponseContext::insertRecordRoute(SipMessage& outgoing,
-                                   const Transport* receivedTransport,
+                                   const resip::Tuple& receivedTransportTuple,
+                                   const resip::NameAddr& receivedTransportRecordRoute, 
                                    Target* target,
                                    bool doPathInstead)
 {
@@ -607,31 +611,31 @@ ResponseContext::insertRecordRoute(SipMessage& outgoing,
       resip::NameAddr rt;
       if(inboundFlowToken.empty())
       {
-         rt=mRequestContext.mProxy.getRecordRoute(receivedTransport);
+         rt = receivedTransportRecordRoute;
       }
       else
       {
-         if(isSecure(receivedTransport->getTuple().getType()))
+         if(isSecure(receivedTransportTuple.getType()))
          {
             // .bwc. Debatable. Should we be willing to reuse a TLS connection
             // at the behest of a Route header with no hostname in it?
-            rt=mRequestContext.mProxy.getRecordRoute(receivedTransport);
+            rt = receivedTransportRecordRoute;
             rt.uri().scheme() = "sips";
          }
          else
          {
-            if(receivedTransport->getTuple().isAnyInterface())
+            if(receivedTransportTuple.isAnyInterface())
             {
-               rt=mRequestContext.mProxy.getRecordRoute(receivedTransport);
+               rt = receivedTransportRecordRoute;
             }
             else
             {
-               rt.uri().host()=resip::Tuple::inet_ntop(receivedTransport->getTuple());
+               rt.uri().host()=resip::Tuple::inet_ntop(receivedTransportTuple);
             }
-            rt.uri().port()=receivedTransport->getTuple().getPort();
-            rt.uri().param(resip::p_transport)=resip::Tuple::toDataLower(receivedTransport->getTuple().getType());
+            rt.uri().port() = receivedTransportTuple.getPort();
+            rt.uri().param(resip::p_transport) = resip::Tuple::toDataLower(receivedTransportTuple.getType());
          }
-         rt.uri().user()=inboundFlowToken;
+         rt.uri().user() = inboundFlowToken;
       }
       Helper::massageRoute(outgoing,rt);
 
@@ -678,7 +682,8 @@ ResponseContext::insertRecordRoute(SipMessage& outgoing,
    {
       std::auto_ptr<resip::MessageDecorator> rrDecorator(
                                  new RRDecorator(mRequestContext.mProxy,
-                                                receivedTransport,
+                                                receivedTransportTuple,
+                                                receivedTransportRecordRoute,
                                                 recordRouted,
                                                 !inboundFlowToken.empty(),
                                                 mRequestContext.mProxy.getRecordRouteForced(),
@@ -829,7 +834,7 @@ ResponseContext::sendingToSelf(Target* target)
 void 
 ResponseContext::sendRequest(resip::SipMessage& request)
 {
-   assert (request.isRequest());
+   resip_assert (request.isRequest());
 
    // Do any required session accounting with this forward request - allows Session Routed event
    mRequestContext.getProxy().doSessionAccounting(request, false /* received */, mRequestContext);
@@ -847,39 +852,70 @@ ResponseContext::sendRequest(resip::SipMessage& request)
 //      }
    }
 
-   // TODO - P-Asserted-Identity Processing
-   // RFC3325 - section 5
-   // When a proxy forwards a message to another node, it must first
-   // determine if it trusts that node or not.  If it trusts the node, the
-   // proxy does not remove any P-Asserted-Identity header fields that it
-   // generated itself, or that it received from a trusted source.  If it
-   // does not trust the element, then the proxy MUST examine the Privacy
-   // header field (if present) to determine if the user requested that
-   // asserted identity information be kept private.
-
-   // Note:  Since we have no better mechanism to determine if destination is trusted or
-   //        not we will assume that all destinations outside our domain are not-trusted
-   //        and will remove the P-Asserted-Identity header, if Privacy is set to "id"
-   if(mRequestContext.getProxy().isPAssertedIdentityProcessingEnabled() &&
-      request.exists(h_Privacies) && 
-      request.header(h_Privacies).size() > 0 && 
-      request.exists(h_PAssertedIdentities) && 
-      !mRequestContext.getProxy().isMyUri(request.header(h_RequestLine).uri()))
+   // If this request is destined outside our domain then remove certain headers
+   bool isMyUri;
+   if(request.exists(h_Routes) &&
+      !request.const_header(h_Routes).empty())
    {
-      // Look for "id" token
-      bool found = false;
-      PrivacyCategories::iterator it = request.header(h_Privacies).begin();
-      for(; it != request.header(h_Privacies).end() && !found; it++)
+      isMyUri = mRequestContext.getProxy().isMyUri(request.const_header(h_Routes).front().uri());
+   }
+   else
+   {
+      isMyUri = mRequestContext.getProxy().isMyUri(request.const_header(h_RequestLine).uri());
+   }
+   if(!isMyUri)
+   {
+      // TODO - P-Asserted-Identity Processing
+      // RFC3325 - section 5
+      // When a proxy forwards a message to another node, it must first
+      // determine if it trusts that node or not.  If it trusts the node, the
+      // proxy does not remove any P-Asserted-Identity header fields that it
+      // generated itself, or that it received from a trusted source.  If it
+      // does not trust the element, then the proxy MUST examine the Privacy
+      // header field (if present) to determine if the user requested that
+      // asserted identity information be kept private.
+
+       // Note:  Since we have no better mechanism to determine if destination is trusted or
+      //        not we will assume that all destinations outside our domain are not-trusted
+      //        and will remove the P-Asserted-Identity header, if Privacy is set to "id"
+      if(mRequestContext.getProxy().isPAssertedIdentityProcessingEnabled() &&
+         request.exists(h_Privacies) && 
+         request.header(h_Privacies).size() > 0 && 
+         request.exists(h_PAssertedIdentities))
       {
-         std::vector<Data>::iterator itToken = it->value().begin();
-         for(; itToken != it->value().end() && !found; itToken++)
+         // Look for "id" token
+         bool found = false;
+         PrivacyCategories::iterator it = request.header(h_Privacies).begin();
+         for(; it != request.header(h_Privacies).end() && !found; it++)
          {
-            if(*itToken == "id")
+            std::vector<Data>::iterator itToken = it->value().begin();
+            for(; itToken != it->value().end() && !found; itToken++)
             {
-               request.remove(h_PAssertedIdentities); 
-               found = true;
+               if(*itToken == "id")
+               {
+                  request.remove(h_PAssertedIdentities); 
+                  found = true;
+               }
             }
          }
+      }
+
+      // Delete the Proxy-Auth header for this realm if forwarding outside our domain
+      // other Proxy-Auth headers might be needed by a downsteram node
+      if (request.exists(h_ProxyAuthorizations) && !mRequestContext.getProxy().isNeverStripProxyAuthorizationHeadersEnabled())
+      {
+         Auths &authHeaders = request.header(h_ProxyAuthorizations);
+         for (Auths::iterator i = authHeaders.begin(); i != authHeaders.end(); )
+         {
+            if(i->exists(p_realm) && mRequestContext.getProxy().isMyDomain(i->param(p_realm)))
+            {
+               i = authHeaders.erase(i);
+            }
+            else
+            {
+               ++i;
+           }
+         } 
       }
    }
 
@@ -896,8 +932,8 @@ ResponseContext::sendRequest(resip::SipMessage& request)
 void
 ResponseContext::processCancel(const SipMessage& request)
 {
-   assert(request.isRequest());
-   assert(request.method() == CANCEL);
+   resip_assert(request.isRequest());
+   resip_assert(request.method() == CANCEL);
 
    std::auto_ptr<SipMessage> ok(Helper::makeResponse(request, 200));   
    mRequestContext.sendResponse(*ok);
@@ -932,8 +968,8 @@ ResponseContext::processResponse(SipMessage& response)
    // store this before we pop the via and lose the branch tag
    mCurrentResponseTid = response.getTransactionId();
    
-   assert (response.isResponse());
-   assert (response.exists(h_Vias) && !response.header(h_Vias).empty());
+   resip_assert (response.isResponse());
+   resip_assert (response.exists(h_Vias) && !response.header(h_Vias).empty());
    response.header(h_Vias).pop_front();
 
    // Stop processing responses that have nowhere else to go
@@ -1195,7 +1231,7 @@ ResponseContext::processResponse(SipMessage& response)
          break;
          
       default:
-         assert(0);
+         resip_assert(0);
          break;
    }
 }
@@ -1254,7 +1290,7 @@ ResponseContext::getPriority(const resip::SipMessage& msg)
    int responseCode = msg.header(h_StatusLine).statusCode();
    int p = 0;  // "p" is the relative priority of the response
 
-      assert(responseCode >= 300 && responseCode <= 599);
+      resip_assert(responseCode >= 300 && responseCode <= 599);
       if (responseCode <= 399)  // 3xx response
       { 
          return 5;  // response priority is 5
@@ -1386,8 +1422,8 @@ ResponseContext::getPriority(const resip::SipMessage& msg)
 bool 
 ResponseContext::CompareStatus::operator()(const resip::SipMessage& lhs, const resip::SipMessage& rhs) const
 {
-   assert(lhs.isResponse());
-   assert(rhs.isResponse());
+   resip_assert(lhs.isResponse());
+   resip_assert(rhs.isResponse());
    
    // !rwm! replace with correct thingy here
    return lhs.header(h_StatusLine).statusCode() < rhs.header(h_StatusLine).statusCode();

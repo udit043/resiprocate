@@ -1,6 +1,5 @@
 #include "TurnSocket.hxx"
 #include "ErrorCode.hxx"
-#include <boost/bind.hpp>
 #include <rutil/Lock.hxx>
 #include <rutil/WinLeakCheck.hxx>
 #include <rutil/Logger.hxx>
@@ -418,7 +417,7 @@ TurnSocket::setActiveDestination(const asio::ip::address& address, unsigned shor
    {
       // No remote peer yet (ie. not data sent or received from remote peer) - so create one
       mActiveDestination = mChannelManager.createChannelBinding(remoteTuple);
-      assert(mActiveDestination);
+      resip_assert(mActiveDestination);
       errorCode = channelBind(*mActiveDestination);
    }
 
@@ -577,7 +576,7 @@ TurnSocket::sendTo(RemotePeer& remotePeer, const char* buffer, unsigned int size
       if(remotePeer.getPeerTuple().getAddress().is_v6())
       {
          ind.mTurnXorPeerAddress[0].family = StunMessage::IPv6Family;
-         memcpy(&ind.mTurnXorPeerAddress[0].addr.ipv6, remotePeer.getPeerTuple().getAddress().to_v6().to_bytes().c_array(), sizeof(ind.mTurnXorPeerAddress[0].addr.ipv6));
+         memcpy(&ind.mTurnXorPeerAddress[0].addr.ipv6, remotePeer.getPeerTuple().getAddress().to_v6().to_bytes().data(), sizeof(ind.mTurnXorPeerAddress[0].addr.ipv6));
       }
       else
       {

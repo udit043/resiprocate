@@ -1,18 +1,21 @@
 # $Id$
 
-EXTRA_DIST = dh512.pem server.pem
+EXTRA_DIST = dh2048.pem server.pem
 EXTRA_DIST += pkg
 EXTRA_DIST += README.txt
 EXTRA_DIST += *.sln
 EXTRA_DIST += *.vcproj
-EXTRA_DIST += reTurnServer_10_0.vcxproj reTurnServer_10_0.vcxproj.filters
+EXTRA_DIST += *.vcxproj *.vcxproj.filters
 EXTRA_DIST += reTurnServer.config
+EXTRA_DIST += users.txt
 
 dist_man_MANS = reTurnServer.8
 
+dist_returnpkglib_SCRIPTS = psql-user-extract
+
 SUBDIRS = .
-SUBDIRS += test
 SUBDIRS += client
+SUBDIRS += test
 
 #AM_CXXFLAGS = -DUSE_ARES
 AM_CXXFLAGS = -I $(top_srcdir)
@@ -46,8 +49,8 @@ reTurnServer_SOURCES = reTurnServer.cxx \
         UdpServer.cxx \
 	UserAuthData.cxx
 
-#reTurnServerincludedir = $(includedir)/reTurnServer
-noinst_HEADERS = AsyncSocketBaseHandler.hxx \
+reTurnincludedir = $(includedir)/reTurn
+nobase_reTurninclude_HEADERS = AsyncSocketBaseHandler.hxx \
 	AsyncSocketBase.hxx \
 	AsyncTcpSocketBase.hxx \
 	AsyncTlsSocketBase.hxx \
@@ -77,11 +80,11 @@ noinst_HEADERS = AsyncSocketBaseHandler.hxx \
 	reTurnServer.hxx
 
 #reTurnServer_LDADD = librepro.la
-reTurnServer_LDADD = ../resip/dum/libdum.la
-reTurnServer_LDADD += ../resip/stack/libresip.la ../rutil/librutil.la
+reTurnServer_LDADD = ../rutil/librutil.la
 #reTurnServer_LDADD += ../contrib/ares/libares.a
 #reTurnServer_LDADD += -L../contrib/ares -lares
-reTurnServer_LDADD += @LIBSSL_LIBADD@ -lcrypto -lpthread
+reTurnServer_LDADD += @LIBSTL_LIBADD@
+reTurnServer_LDADD += @LIBSSL_LIBADD@ -lcrypto @LIBPTHREAD_LIBADD@
 
 #lib_LTLIBRARIES = librepro.la
 

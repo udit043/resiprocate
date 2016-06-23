@@ -3,14 +3,14 @@
 #endif
 
 #ifdef USE_SSL
-#ifdef USE_DTLS
-
 #include <asio.hpp>
+#include <asio/ssl.hpp>
 #include <boost/function.hpp>
 #include <iostream>
 
 #include <rutil/Log.hxx>
 #include <rutil/Logger.hxx>
+#include <rutil/Timer.hxx>
 
 #include "FlowDtlsSocketContext.hxx"
 #include "FlowManagerSubsystem.hxx"
@@ -90,9 +90,9 @@ FlowDtlsSocketContext::handshakeCompleted()
    mSocket->createSrtpSessionPolicies(mSRTPPolicyOut, mSRTPPolicyIn);
 
    r=srtp_create(&mSRTPSessionIn, &mSRTPPolicyIn);   
-   assert(r==0);
+   resip_assert(r==0);
    r=srtp_create(&mSRTPSessionOut, &mSRTPPolicyOut);
-   assert(r==0);
+   resip_assert(r==0);
    mSrtpInitialized = true;
 }
  
@@ -151,7 +151,6 @@ FlowDtlsSocketContext::srtpUnprotect(void* data, int* size, bool rtcp)
 }
 
 #endif 
-#endif
 /* ====================================================================
 
  Copyright (c) 2007-2008, Plantronics, Inc.

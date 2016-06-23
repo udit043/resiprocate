@@ -1,14 +1,18 @@
 #include <algorithm>
-#include <cassert>
+#include "rutil/ResipAssert.h"
 #include <ctype.h>
+#include <fstream>
 #include <math.h>
+#include <limits>
 #include <limits.h>
+#include <stdexcept>
 
 #if defined(HAVE_CONFIG_H)
 #include "config.h"
 #endif
 
 #include "rutil/Data.hxx"
+#include "rutil/DataException.hxx"
 #include "rutil/ParseBuffer.hxx"
 #include "rutil/vmd5.hxx"
 #include "rutil/Coders.hxx"
@@ -51,6 +55,27 @@ const bool DataHelper::isCharHex[256] =
 
 //must be lowercase for MD5
 static const char hexmap[] = "0123456789abcdef";
+
+static const signed char inversehexmap[] = {
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,     // 0 - 
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1,             //   - 47
+
+          0, 1, 2, 3, 4, 5, 6, 7, 8, 9,         // 48 ...
+
+                                     -1, -1,    // 58 -
+    -1, -1, -1, -1, -1,                         //  -64
+
+          10, 11, 12, 13, 14, 15,               // 65 ...
+
+        -1, -1, -1, -1, -1, -1, -1, -1, -1,     // 71 ...
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1,                 //   - 96
+
+          10, 11, 12, 13, 14, 15                // 97 ...
+};
 
 int 
 hexpair2int(char high, char low)
@@ -201,7 +226,7 @@ Data::Data(size_type capacity,
                : LocalAlloc),
      mShareEnum(capacity > LocalAlloc ? Take : Borrow)
 {
-   assert( capacity >= 0 );
+   resip_assert( capacity >= 0 );
    mBuf[mSize] = 0;
 }
 
@@ -217,45 +242,19 @@ Data::Data(size_type capacity, bool)
                : LocalAlloc),
      mShareEnum(capacity > LocalAlloc ? Take : Borrow)
 {
-   assert( capacity >= 0 );
+   resip_assert( capacity >= 0 );
    mBuf[mSize] = 0;
 }
 #endif
 
 Data::Data(const char* str, size_type length) 
-   : mBuf(length > LocalAlloc 
-          ? new char[length + 1]
-          : mPreBuffer),
-     mSize(length),
-     mCapacity(mSize > LocalAlloc
-               ? mSize
-               : LocalAlloc),
-     mShareEnum(mSize > LocalAlloc ? Take : Borrow)
 {
-   if (mSize > 0)
-   {
-      assert(str);
-      memcpy(mBuf, str, mSize);
-   }
-   mBuf[mSize]=0;
+   initFromString(str, length);
 }
 
 Data::Data(const unsigned char* str, size_type length) 
-   : mBuf(length > LocalAlloc 
-          ? new char[length + 1]
-          : mPreBuffer),
-     mSize(length),
-     mCapacity(mSize > LocalAlloc
-               ? mSize
-               : LocalAlloc),
-     mShareEnum(mSize > LocalAlloc ? Take : Borrow)
 {
-   if (mSize > 0)
-   {
-      assert(str);
-      memcpy(mBuf, str, mSize);
-   }
-   mBuf[mSize]=0;
+   initFromString((const char*)str, length);
 }
 
 // share memory KNOWN to be in a surrounding scope
@@ -267,7 +266,40 @@ Data::Data(const char* str, size_type length, bool)
      mCapacity(mSize),
      mShareEnum(Share)
 {
-   assert(str);
+   resip_assert(str);
+}
+
+void
+Data::initFromString(const char* str, size_type len)
+{
+   mSize = len;
+   if(len > 0)
+   {
+      resip_assert(str);
+   }
+   size_t bytes = len + 1;
+   if(bytes <= len)
+   {
+      // integer overflow
+      throw std::bad_alloc();
+   }
+   if(bytes > LocalAlloc)
+   {
+      mBuf = new char[bytes];
+      mCapacity = mSize;
+      mShareEnum = Take;
+   }
+   else
+   {
+      mBuf = mPreBuffer;
+      mCapacity = LocalAlloc;
+      mShareEnum = Borrow;
+   }
+   if(str)
+   {
+      memcpy(mBuf, str, len);
+   }
+   mBuf[mSize] = 0;
 }
 
 Data::Data(ShareEnum se, const char* buffer, size_type length)
@@ -276,7 +308,7 @@ Data::Data(ShareEnum se, const char* buffer, size_type length)
      mCapacity(mSize),
      mShareEnum(se)
 {
-   assert(buffer);
+   resip_assert(buffer);
 }
 
 Data::Data(ShareEnum se, const char* buffer, size_type length, size_type capacity)
@@ -285,7 +317,7 @@ Data::Data(ShareEnum se, const char* buffer, size_type length, size_type capacit
      mCapacity(capacity),
      mShareEnum(se)
 {
-   assert(buffer);
+   resip_assert(buffer);
 }
 
 Data::Data(ShareEnum se, const char* buffer)
@@ -294,7 +326,7 @@ Data::Data(ShareEnum se, const char* buffer)
      mCapacity(mSize),
      mShareEnum(se)
 {
-   assert(buffer);
+   resip_assert(buffer);
 }
 
 Data::Data(ShareEnum se, const Data& staticData)
@@ -306,64 +338,23 @@ Data::Data(ShareEnum se, const Data& staticData)
    // !dlb! maybe:
    // if you are trying to use Take, but make sure that you unset the mShareEnum on
    // the staticData
-   assert(se == Share); // makes no sense to call this with 'Take'.
+   resip_assert(se == Share); // makes no sense to call this with 'Take'.
 }
 //=============================================================================
 
-Data::Data(const char* str) // We need mSize to init mBuf; do in body
-   : mSize(str ? strlen(str) : 0),
-     mCapacity(mSize > LocalAlloc
-               ? mSize
-               : LocalAlloc),
-     mShareEnum(mSize > LocalAlloc ? Take : Borrow)
+Data::Data(const char* str)
 {
-   if(mSize > LocalAlloc)
-   {
-      mBuf = new char[mSize+1];
-   }
-   else
-   {
-      mBuf = mPreBuffer;
-   }
-
-   if (str)
-   {
-      memcpy(mBuf, str, mSize+1);
-   }
-   else
-   {
-      mBuf[mSize] = 0;
-   }
+   initFromString(str, str ? strlen(str) : 0);
 }
 
 Data::Data(const string& str)
-   : mBuf(str.size() > LocalAlloc
-          ? new char[str.size() + 1]
-          : mPreBuffer),
-     mSize(str.size()),
-     mCapacity(mSize > LocalAlloc
-               ? mSize
-               : LocalAlloc),
-     mShareEnum(mSize > LocalAlloc ? Take : Borrow)
 {
-   memcpy(mBuf, str.c_str(), mSize + 1);
+   initFromString(str.c_str(), str.size());
 }
 
 Data::Data(const Data& data) 
-   : mBuf(data.mSize > LocalAlloc
-          ? new char[data.mSize + 1]
-          : mPreBuffer),
-     mSize(data.mSize),
-     mCapacity(mSize > LocalAlloc
-               ? mSize
-               : LocalAlloc),
-     mShareEnum(mSize > LocalAlloc ? Take : Borrow)
 {
-   if (mSize)
-   {
-      memcpy(mBuf, data.mBuf, mSize);
-   }
-   mBuf[mSize] = 0;
+   initFromString(data.mBuf, data.mSize);
 }
 
 #ifdef RESIP_HAS_RVALUE_REFS
@@ -375,17 +366,22 @@ Data::Data(Data &&data)
 #endif
 
 // -2147483646
-static const int IntMaxSize = 12;
+static const int Int32MaxSize = 11;
 
-Data::Data(int val)
-   : mBuf(IntMaxSize > LocalAlloc 
-          ? new char[IntMaxSize + 1]
+static const int MaxLongSize = (sizeof(unsigned long)/sizeof(int))*Int32MaxSize;
+
+// 18446744073709551615
+static const int UInt64MaxSize = 20;
+
+Data::Data(Int32 val)
+   : mBuf(Int32MaxSize > LocalAlloc 
+          ? new char[Int32MaxSize + 1]
           : mPreBuffer),
      mSize(0),
-     mCapacity(IntMaxSize > LocalAlloc
-               ? IntMaxSize
+     mCapacity(Int32MaxSize > LocalAlloc
+               ? Int32MaxSize
                : LocalAlloc),
-     mShareEnum(IntMaxSize > LocalAlloc ? Take : Borrow)
+     mShareEnum(Int32MaxSize > LocalAlloc ? Take : Borrow)
 {
    if (val == 0)
    {
@@ -397,7 +393,7 @@ Data::Data(int val)
 
    bool neg = false;
    
-   int value = val;
+   Int32 value = val;
    if (value < 0)
    {
       value = -value;
@@ -405,7 +401,7 @@ Data::Data(int val)
    }
 
    int c = 0;
-   int v = value;
+   Int32 v = value;
    while (v /= 10)
    {
       ++c;
@@ -432,47 +428,8 @@ Data::Data(int val)
    }
 }
 
-static const int MaxLongSize = (sizeof(unsigned long)/sizeof(int))*IntMaxSize;
-Data::Data(unsigned long value)
-   : mBuf(MaxLongSize > LocalAlloc 
-          ? new char[MaxLongSize + 1]
-          : mPreBuffer),
-     mSize(0),
-     mCapacity(MaxLongSize > LocalAlloc
-               ? MaxLongSize
-               : LocalAlloc),
-     mShareEnum(MaxLongSize > LocalAlloc ? Take : Borrow)
-{
-   if (value == 0)
-   {
-      mBuf[0] = '0';
-      mBuf[1] = 0;
-      mSize = 1;
-      return;
-   }
-
-   int c = 0;
-   unsigned long v = value;
-   while (v /= 10)
-   {
-      ++c;
-   }
-
-   mSize = c+1;
-   mBuf[c+1] = 0;
-   
-   v = value;
-   while (v)
-   {
-      unsigned int digit = v%10;
-      unsigned char d = (char)digit;
-      mBuf[c--] = '0' + d;
-      v /= 10;
-   }
-}
-
 #ifndef RESIP_FIXED_POINT
-static const int DoubleMaxSize = MaxLongSize + Data::MaxDigitPrecision;
+static const int DoubleMaxSize = UInt64MaxSize + Data::MaxDigitPrecision;
 Data::Data(double value, 
            Data::DoubleDigitPrecision precision)
    : mBuf(DoubleMaxSize + precision > LocalAlloc 
@@ -484,8 +441,8 @@ Data::Data(double value,
                : LocalAlloc),
      mShareEnum(DoubleMaxSize + precision > LocalAlloc ? Take : Borrow)
 {
-   assert(precision >= 0);
-   assert(precision < MaxDigitPrecision);
+   resip_assert(precision >= 0);
+   resip_assert(precision < MaxDigitPrecision);
 
    double v = value;
    bool neg = (value < 0.0);
@@ -495,7 +452,7 @@ Data::Data(double value,
       v = -v;
    }
 
-   Data m((unsigned long)v);
+   Data m((UInt64)v);
 
    // remainder
    v = v - floor(v);
@@ -556,19 +513,19 @@ Data::Data(double value,
       mSize = m.size() + d.size() + 1;
    }
 
-   assert(mBuf[mSize] == 0);
+   resip_assert(mBuf[mSize] == 0);
 }
 #endif
 
-Data::Data(unsigned int value)
-   : mBuf(IntMaxSize > LocalAlloc 
-          ? new char[IntMaxSize + 1]
+Data::Data(UInt32 value)
+   : mBuf(Int32MaxSize > LocalAlloc 
+          ? new char[Int32MaxSize + 1]
           : mPreBuffer),
      mSize(0),
-     mCapacity(IntMaxSize > LocalAlloc
-               ? IntMaxSize
+     mCapacity(Int32MaxSize > LocalAlloc
+               ? Int32MaxSize
                : LocalAlloc),
-     mShareEnum(IntMaxSize > LocalAlloc ? Take : Borrow)
+     mShareEnum(Int32MaxSize > LocalAlloc ? Take : Borrow)
 {
    if (value == 0)
    {
@@ -579,7 +536,7 @@ Data::Data(unsigned int value)
    }
 
    int c = 0;
-   unsigned long v = value;
+   UInt32 v = value;
    while (v /= 10)
    {
       ++c;
@@ -597,9 +554,6 @@ Data::Data(unsigned int value)
       v /= 10;
    }
 }
-
-// 18446744073709551615
-static const int UInt64MaxSize = 20;
 
 Data::Data(UInt64 value)
    : mBuf(UInt64MaxSize > LocalAlloc 
@@ -664,7 +618,7 @@ Data::Data(bool value)
 Data&
 Data::setBuf(ShareEnum se, const char* buffer, size_type length)
 {
-   assert(buffer);
+   resip_assert(buffer);
    if (mShareEnum == Take)
    {
       delete[] mBuf;
@@ -705,6 +659,32 @@ Data::takeBuf(Data& other)
    other.mCapacity = LocalAlloc;
    other.mShareEnum = Data::Borrow;
    other.mPreBuffer[0] = 0;
+
+   return *this;
+}
+
+Data& 
+Data::duplicate(const Data& other)
+{
+   if (&other == this)
+      return *this;
+
+   if (mShareEnum == Data::Take)
+      delete[] mBuf;
+
+   if (other.mBuf == other.mPreBuffer)
+   {
+      // plus one picks up the terminating safety NULL
+      memcpy(mPreBuffer, other.mPreBuffer, other.mSize + 1);
+      mBuf = mPreBuffer;
+   }
+   else
+   {
+      mBuf = other.mBuf;
+   }
+   mSize = other.mSize;
+   mCapacity = other.mCapacity;
+   mShareEnum = other.mShareEnum;
 
    return *this;
 }
@@ -764,8 +744,8 @@ resip::operator==(const Data& lhs, const Data& rhs)
 bool 
 resip::operator==(const Data& lhs, const char* rhs)
 {
-   assert(rhs); // .dlb. not consistent with constructor
-   if (memcmp(lhs.mBuf, rhs, lhs.mSize) != 0)
+   resip_assert(rhs); // .dlb. not consistent with constructor
+   if (strncmp(lhs.mBuf, rhs, lhs.mSize) != 0)
    {
       return false;
    }
@@ -798,7 +778,7 @@ resip::operator<(const Data& lhs, const Data& rhs)
 bool
 resip::operator<(const Data& lhs, const char* rhs)
 {
-   assert(rhs);
+   resip_assert(rhs);
    Data::size_type l = strlen(rhs);
    int res = memcmp(lhs.mBuf, rhs, resipMin(lhs.mSize, l));
 
@@ -819,7 +799,7 @@ resip::operator<(const Data& lhs, const char* rhs)
 bool
 resip::operator<(const char* lhs, const Data& rhs)
 {
-   assert(lhs);
+   resip_assert(lhs);
    Data::size_type l = strlen(lhs);
    int res = memcmp(lhs, rhs.mBuf, resipMin(l, rhs.mSize));
 
@@ -844,7 +824,7 @@ resip::operator<(const char* lhs, const Data& rhs)
 Data& 
 Data::operator=(const Data& data)
 {
-   assert(mBuf);
+   resip_assert(mBuf);
    
    if (&data != this)
    {
@@ -980,7 +960,7 @@ Data::at(size_type p)
 Data& 
 Data::operator=(const char* str)
 {
-   assert(str);
+   resip_assert(str);
    size_type l = strlen(str);
 
    if (mShareEnum == Share)
@@ -1006,7 +986,7 @@ Data::operator=(const char* str)
 Data 
 Data::operator+(const char* str) const
 {
-   assert(str);
+   resip_assert(str);
    size_t l = strlen(str);
    Data tmp(mSize + l, Data::Preallocate);
    tmp.mSize = mSize + l;
@@ -1029,7 +1009,7 @@ Data::reserve(size_type len)
 Data&
 Data::append(const char* str, size_type len)
 {
-   assert(str);
+   resip_assert(str);
    if (mCapacity <= mSize + len)  // append null terminates, thus the equality
    {
       // .dlb. pad for future growth?
@@ -1091,14 +1071,21 @@ void
 Data::resize(size_type newCapacity, 
              bool copy)
 {
-   assert(newCapacity >= mCapacity || mShareEnum == Data::Share);
+   resip_assert(newCapacity >= mCapacity || mShareEnum == Data::Share);
 
    char *oldBuf = mBuf;
    bool needToDelete=(mShareEnum==Take);
 
+   size_t newBytes = newCapacity + 1;
+   if(newBytes <= newCapacity)
+   {
+      // integer overflow
+      throw std::range_error("newCapacity too big");
+   }
+
    if(newCapacity > LocalAlloc)
    {
-      mBuf = new char[newCapacity+1];
+      mBuf = new char[newBytes];
       mShareEnum = Take;
    }
    else
@@ -1142,7 +1129,7 @@ Data::md5(EncodingType type) const
       default:
          return digest.hex();
    }
-   assert(0);
+   resip_assert(0);
    return digest.hex();
 }
 
@@ -1177,7 +1164,7 @@ Data::escaped() const
          
          int hi = (c & 0xF0)>>4;
          int low = (c & 0x0F);
-	   
+      
          ret += hexmap[hi];
          ret += hexmap[low];
       }
@@ -1223,7 +1210,7 @@ Data::charEncoded() const
          
          int hi = (c & 0xF0)>>4;
          int low = (c & 0x0F);
-	   
+      
          ret += hexmap[hi];
          ret += hexmap[low];
       }
@@ -1255,7 +1242,7 @@ Data::charUnencoded() const
             // !rwm! changed from high==0 || low==0
             if (high == 0 && low == 0)
             {
-               assert(0);
+               resip_assert(0);
                // ugh
                return ret;
             }
@@ -1546,6 +1533,42 @@ Data::hex() const
    return ret;
 }
 
+Data
+Data::fromHex() const
+{
+   bool oddSize = mSize & 1;
+   size_type resultSize = (mSize + (mSize & 1)) / 2;
+   Data ret(resultSize, Data::Preallocate);
+
+   const unsigned char* p = (unsigned char*)mBuf;
+   char* r = ret.mBuf;
+   size_type i = 0;
+   if(oddSize)
+   {
+      if(!isHex(*p))
+      {
+         throw DataException("Encountered non-hex digit",
+                                    __FILE__,__LINE__);
+      }
+      *r++ = inversehexmap[*p++];
+      i++;
+   }
+   for ( ; i < mSize; i+=2)
+   {
+      const unsigned char high = *p++;
+      const unsigned char low = *p++;
+      if(!isHex(high) || !isHex(low))
+      {
+         throw DataException("Encountered non-hex digit",
+                                    __FILE__,__LINE__);
+      }
+
+      *r++ = (inversehexmap[high] << 4) + inversehexmap[low];
+   }
+   ret.mSize = resultSize;
+   return ret;
+}
+
 Data&
 Data::lowercase()
 {
@@ -1824,14 +1847,14 @@ Data::postfix(const Data& post) const
 Data 
 Data::substr(size_type first, size_type count) const
 {
-   assert(first <= mSize);
+   resip_assert(first <= mSize);
    if ( count == Data::npos)
    {
       return Data(mBuf+first, mSize-first);
    }
    else
    {
-      assert(first + count <= mSize);
+      resip_assert(first + count <= mSize);
       return Data(mBuf+first, count);
    }
 }
@@ -1858,7 +1881,7 @@ Data::replace(const Data& match,
               const Data& replaceWith,
               int max)
 {
-   assert(!match.empty());
+   resip_assert(!match.empty());
 
    int count = 0;
 
@@ -1976,6 +1999,19 @@ Data::rawCaseInsensitiveHash(const unsigned char* c, size_t size)
    return ntohl((u_long)st);
 }
 
+#if defined(RESIP_BIG_ENDIAN) || (defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__))
+
+#if !defined (get16bits)
+#define get16bits(d) ((((UInt32)(((const UInt8 *)(d))[0])) << 8)\
+                       +(UInt32)(((const UInt8 *)(d))[1]) )
+#endif
+
+#if !defined (get32bits)
+#define get32bits(d) ((get16bits(d) << 16) + get16bits(d+2))
+#endif
+
+#else  // little endian:
+
 #undef get16bits
 #if (defined(__GNUC__) && defined(__i386__)) || defined(__WATCOMC__) \
   || defined(_MSC_VER) || defined (__BORLANDC__) || defined (__TURBOC__)
@@ -1995,6 +2031,7 @@ Data::rawCaseInsensitiveHash(const unsigned char* c, size_t size)
 
 #if !defined (get32bits)
 #define get32bits(d) ((get16bits(d+2) << 16) + get16bits(d))
+#endif
 #endif
 
 // This is intended to be a faster case-insensitive hash function that works
@@ -2161,7 +2198,7 @@ switch(size) \
 bool 
 Data::sizeEqualCaseInsensitiveTokenCompare(const Data& rhs) const
 {
-   assert(mSize==rhs.mSize);
+   resip_assert(mSize==rhs.mSize);
    const char* d1(mBuf);
    const char* d2(rhs.mBuf);
 
@@ -2172,7 +2209,7 @@ Data::sizeEqualCaseInsensitiveTokenCompare(const Data& rhs) const
       return true;
    }
 
-   int unalignedPrefix((ptrdiff_t)d1 & 3);
+   int unalignedPrefix(4-((ptrdiff_t)d1 & 3));
 
    compUnalignedRemainder(d1, d2, unalignedPrefix);
 
@@ -2265,7 +2302,7 @@ Data::escapeToStream(std::ostream& str,
          }
          int hi = (*p & 0xF0)>>4;
          int low = (*p & 0x0F);
-	   
+      
          str << '%' << hex[hi] << hex[low];
          anchor=++p;
       }
@@ -2279,6 +2316,57 @@ Data::escapeToStream(std::ostream& str,
       str.write((char*)anchor, p-anchor);
    }
    return str;
+}
+
+Data
+Data::fromFile(const Data& filename)
+{
+   ifstream is;
+   is.open(filename.c_str(), ios::binary );
+   if ( !is.is_open() )
+   {
+      throw DataException("Could not read file ",
+                                    __FILE__,__LINE__);
+   }
+
+   resip_assert(is.is_open());
+
+   int length = 0;
+
+   // get length of file:
+#if !defined(__MSL_CPP__) || (__MSL_CPP_ >= 0x00012000)
+   is.seekg (0, ios::end);
+   length = (int)is.tellg();
+   is.seekg (0, ios::beg);
+#else
+   // this is a work around for a bug in CodeWarrior 9's implementation of seekg.
+   // http://groups.google.ca/group/comp.sys.mac.programmer.codewarrior/browse_frm/thread/a4279eb75f3bd55a
+   FILE * tmpFile = fopen(filename.c_str(), "r+b");
+   resip_assert(tmpFile != NULL);
+   fseek(tmpFile, 0, SEEK_END);
+   length = ftell(tmpFile);
+   fseek(tmpFile, 0, SEEK_SET);
+#endif // __MWERKS__
+
+   // tellg/tell will return -1 if the stream is bad
+   if (length == -1)
+   {
+      throw DataException("Could not seek into file ",
+                                    __FILE__,__LINE__);
+   }
+
+   // !jf! +1 is a workaround for a bug in Data::c_str() that adds the 0 without
+   // resizing.
+   char* buffer = new char [length+1];
+
+   // read data as a block:
+   is.read (buffer,length);
+
+   Data target(Data::Take, buffer, length);
+
+   is.close();
+
+   return target;
 }
 
 HashValueImp(resip::Data, data.hash());
@@ -2380,8 +2468,8 @@ Data::base64encode(bool useSafeSet) const
    unsigned char* codeChar = useSafeSet ? codeCharSafe : codeCharUnsafe;
    
    int srcLength = (int)this->size();
-   unsigned int dstLimitLength = srcLength*4/3 + 1 + 2; // +2 for the == chars
-   unsigned char * dstData = new unsigned char[dstLimitLength];
+   unsigned int dstLimitLength = 4 * (srcLength / 3 + (srcLength%3==0 ? 0 : 1));
+   unsigned char * dstData = new unsigned char[dstLimitLength + 1];
    unsigned int dstIndex = 0;
    
    const char * p = static_cast<const char *>( this->data() );
@@ -2390,9 +2478,9 @@ Data::base64encode(bool useSafeSet) const
    {
       unsigned char codeBits = (p[index] & 0xfc)>>2;
       
-      assert(codeBits < 64);
+      resip_assert(codeBits < 64);
       dstData[dstIndex++] = codeChar[codeBits]; // c0 output
-      assert(dstIndex <= dstLimitLength);
+      resip_assert(dstIndex <= dstLimitLength);
       
       // do second codeBits
       codeBits = ((p[index]&0x3)<<4);
@@ -2400,16 +2488,16 @@ Data::base64encode(bool useSafeSet) const
       {
          codeBits |= ((p[index+1]&0xf0)>>4);
       }
-      assert(codeBits < 64);
+      resip_assert(codeBits < 64);
       dstData[dstIndex++] = codeChar[codeBits]; // c1 output
-      assert(dstIndex <= dstLimitLength);
+      resip_assert(dstIndex <= dstLimitLength);
       
       if (index+1 >= srcLength) 
       {
          dstData[dstIndex++] = codeChar[64];
-         assert(dstIndex <= dstLimitLength);
+         resip_assert(dstIndex <= dstLimitLength);
          dstData[dstIndex++] = codeChar[64];
-         assert(dstIndex <= dstLimitLength);
+         resip_assert(dstIndex <= dstLimitLength);
          break; // encoded d0 only
       }
       
@@ -2419,25 +2507,26 @@ Data::base64encode(bool useSafeSet) const
       {
          codeBits |= ((p[index+2]&0xc0)>>6);
       }
-      assert(codeBits < 64);
+      resip_assert(codeBits < 64);
       dstData[dstIndex++] = codeChar[codeBits]; // c2 output
-      assert(dstIndex <= dstLimitLength);
+      resip_assert(dstIndex <= dstLimitLength);
       
       if (index+2 >= srcLength) 
       {
          dstData[dstIndex++] = codeChar[64];   
-         assert(dstIndex <= dstLimitLength);
+         resip_assert(dstIndex <= dstLimitLength);
          break; // encoded d0 d1 only
       }
       
       // do fourth codeBits
       codeBits = ((p[index+2]&0x3f));
-      assert(codeBits < 64);
+      resip_assert(codeBits < 64);
       dstData[dstIndex++] = codeChar[codeBits]; // c3 output
-      assert(dstIndex <= dstLimitLength);
+      resip_assert(dstIndex <= dstLimitLength);
       // outputed all d0,d1, and d2
    }
 
+   dstData[dstIndex] = 0;
    return Data(Data::Take, reinterpret_cast<char*>(dstData),
                dstIndex);
 }

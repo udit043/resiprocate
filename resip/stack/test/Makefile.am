@@ -14,7 +14,7 @@ EXTRA_DIST += openldap.srv
 EXTRA_DIST += raw-tests.txt
 EXTRA_DIST += RSP-2 RSP-3
 EXTRA_DIST += runtests.sh
-EXTRA_DIST += test_10_0.vcxproj test_10_0.vcxproj.filters
+EXTRA_DIST += *.vcxproj *.vcxproj.filters
 EXTRA_DIST += *.vcproj
 EXTRA_DIST += test.rc
 EXTRA_DIST += *.py
@@ -31,7 +31,7 @@ AM_CXXFLAGS = -I $(top_srcdir)
 LDADD = ../libresip.la
 LDADD += ../../../rutil/librutil.la
 #LDADD += ../../../contrib/ares/libares.a
-LDADD += $(LIBSSL_LIBADD) $(LIBPOPT_LIBADD) -lpthread
+LDADD += $(LIBSSL_LIBADD) $(LIBPOPT_LIBADD) @LIBSTL_LIBADD@ @LIBPTHREAD_LIBADD@
 
 TESTS = \
 	testAppTimer \
@@ -42,6 +42,7 @@ TESTS = \
 	testEmbedded \
 	testEmptyHeader \
 	testExternalLogger \
+    testGenericPidfContents \
 	testIM \
 	testMessageWaiting \
 	testMultipartMixedContents \
@@ -51,6 +52,7 @@ TESTS = \
 	testPksc7 \
 	testPlainContents \
 	testRlmi \
+	testDtmfPayload \
 	testSdp \
 	testSelectInterruptor \
 	testSipFrag \
@@ -61,7 +63,8 @@ TESTS = \
 	testTime \
 	testTimer \
 	testTuple \
-	testUri
+	testUri \
+	testWsCookieContext
 
 check_PROGRAMS = \
 	UAS \
@@ -80,6 +83,7 @@ check_PROGRAMS = \
 	testEmbedded \
 	testEmptyHeader \
 	testExternalLogger \
+    testGenericPidfContents \
 	testIM \
 	testLockStep \
 	testMessageWaiting \
@@ -91,6 +95,7 @@ check_PROGRAMS = \
 	testPlainContents \
 	testResponses \
 	testRlmi \
+	testDtmfPayload \
 	testSdp \
 	testSelect \
 	testSelectInterruptor \
@@ -100,6 +105,7 @@ check_PROGRAMS = \
 	testSipMessageEncode \
 	testSipMessageMemory \
 	testSipStack1 \
+	testSipStackNetNs \
 	testStack \
 	testTcp \
 	testTime \
@@ -108,8 +114,15 @@ check_PROGRAMS = \
 	testTuple \
 	testTypedef \
 	testUdp \
-	testUri
+	testUri \
+	testWsCookieContext
 
+if USE_SSL
+TESTS += testSocketFunc \
+	testSecurity
+check_PROGRAMS += testSocketFunc \
+	testSecurity
+endif
 
 UAS_SOURCES = UAS.cxx
 testEmptyHfv_SOURCES = testEmptyHfv.cxx
@@ -123,10 +136,12 @@ testConnectionBase_SOURCES = testConnectionBase.cxx TestSupport.cxx
 testCorruption_SOURCES = testCorruption.cxx
 testDigestAuthentication_SOURCES = testDigestAuthentication.cxx TestSupport.cxx
 testDtlsTransport_SOURCES = testDtlsTransport.cxx
+testDtmfPayload_SOURCES = testDtmfPayload.cxx
 testDns_SOURCES = testDns.cxx
 testEmbedded_SOURCES = testEmbedded.cxx
 testEmptyHeader_SOURCES = testEmptyHeader.cxx TestSupport.cxx
 testExternalLogger_SOURCES = testExternalLogger.cxx
+testGenericPidfContents_SOURCES = testGenericPidfContents.cxx TestSupport.cxx
 testIM_SOURCES = testIM.cxx
 testLockStep_SOURCES = testLockStep.cxx
 testMessageWaiting_SOURCES = testMessageWaiting.cxx
@@ -139,6 +154,7 @@ testPlainContents_SOURCES = testPlainContents.cxx
 testResponses_SOURCES = testResponses.cxx
 testRlmi_SOURCES = testRlmi.cxx TestSupport.cxx
 testSdp_SOURCES = testSdp.cxx TestSupport.cxx
+testSecurity_SOURCES = testSecurity.cxx
 testSelect_SOURCES = testSelect.cxx
 testSelectInterruptor_SOURCES = testSelectInterruptor.cxx
 testServer_SOURCES = testServer.cxx
@@ -147,6 +163,8 @@ testSipMessage_SOURCES = testSipMessage.cxx TestSupport.cxx
 testSipMessageEncode_SOURCES = testSipMessageEncode.cxx
 testSipMessageMemory_SOURCES = testSipMessageMemory.cxx TestSupport.cxx
 testSipStack1_SOURCES = testSipStack1.cxx
+testSipStackNetNs_SOURCES = testSipStackNetNs.cxx
+testSocketFunc_SOURCES = testSocketFunc.cxx
 testStack_SOURCES = testStack.cxx
 testTcp_SOURCES = testTcp.cxx
 testTime_SOURCES = testTime.cxx
@@ -156,6 +174,7 @@ testTuple_SOURCES = testTuple.cxx
 testTypedef_SOURCES = testTypedef.cxx
 testUdp_SOURCES = testUdp.cxx
 testUri_SOURCES = testUri.cxx TestSupport.cxx
+testWsCookieContext_SOURCES = testWsCookieContext.cxx
 
 noinst_HEADERS = digcalc.hxx \
 	InviteClient.hxx \

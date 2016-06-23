@@ -59,6 +59,12 @@ class TransactionState : public DnsHandler
          Bogus
       } State;
 
+      typedef enum
+      {
+         None,
+         Dns
+      } PendingOperation;
+
       TransactionState(TransactionController& controller, 
                        Machine m, 
                        State s, 
@@ -79,6 +85,7 @@ class TransactionState : public DnsHandler
       void processClientStale(TransactionMessage* msg);
       void processServerStale(TransactionMessage* msg);
       void processTransportFailure(TransactionMessage* failure);
+      void processTcpConnectState(TransactionMessage* msg);
       void processNoDnsResults();
       void processReliability(TransportType type);
       
@@ -94,6 +101,7 @@ class TransactionState : public DnsHandler
       bool isFromTU(TransactionMessage* msg) const;
       bool isFromWire(TransactionMessage* msg) const;
       bool isTransportError(TransactionMessage* msg) const;
+      bool isTcpConnectState(TransactionMessage* msg) const;
       bool isSentReliable(TransactionMessage* msg) const;
       bool isSentUnreliable(TransactionMessage* msg) const;
       bool isReliabilityIndication(TransactionMessage* msg) const;
@@ -103,6 +111,7 @@ class TransactionState : public DnsHandler
       void sendToTU(TransactionMessage* msg);
       static void sendToTU(TransactionUser* tu, TransactionController& controller, TransactionMessage* msg);
       void sendCurrentToWire();
+      void onSendSuccess();
       SipMessage* make100(SipMessage* request) const;
       void terminateClientTransaction(const Data& tid); 
       void terminateServerTransaction(const Data& tid); 
@@ -174,12 +183,13 @@ class TransactionState : public DnsHandler
       unsigned int mCurrentResponseCode;
 
       bool mAckIsValid;
-      bool mWaitingForDnsResult;
+      PendingOperation mPendingOperation;
       TransactionUser* mTransactionUser;
       TransportFailure::FailureReason mFailureReason;      
       int mFailureSubCode;
+      bool mTcpConnectTimerStarted;
 
-      static unsigned long StatelessIdCounter;
+      static UInt32 StatelessIdCounter;
       
       friend EncodeStream& operator<<(EncodeStream& strm, const TransactionState& state);
       friend class TransactionController;

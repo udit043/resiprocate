@@ -2,7 +2,7 @@
 #define WORKER_HXX 1
 
 #include "resip/stack/ApplicationMessage.hxx"
-#include <cassert>
+#include "rutil/ResipAssert.h"
 
 namespace repro
 {
@@ -12,6 +12,9 @@ class Worker
    public:
       Worker(){};
       virtual ~Worker(){};
+
+      // called once when the thread is started
+      virtual void onStart() {};
       
       // return true to queue to stack when complete, false when no response is required
       virtual bool process(resip::ApplicationMessage* msg)=0;

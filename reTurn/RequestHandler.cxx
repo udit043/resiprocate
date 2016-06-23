@@ -21,7 +21,6 @@ using namespace resip;
 namespace reTurn {
 
 // !slg! TODO these need to be made into settings
-#define SOFTWARE_STRING "reTURNServer 0.5 (RFC5389)  "  // Note padding size to a multiple of 4, to help compatibility with older clients
 #define DEFAULT_BANDWIDTH 100  // 100 kbit/s - enough for G711 RTP ?slg? what do we want this to be?
 
 RequestHandler::RequestHandler(TurnManager& turnManager,
@@ -142,9 +141,9 @@ RequestHandler::processStunMessage(AsyncSocketBase* turnSocket, TurnAllocationMa
       // Copy over TransactionId
       response.mHeader.magicCookieAndTid = request.mHeader.magicCookieAndTid;
 
-      if (1) // add Software name - could be a setting in the future
+      if (!getConfig().mSoftwareName.empty())
       {
-         response.setSoftware(SOFTWARE_STRING);
+         response.setSoftware(getConfig().mSoftwareName.c_str());
       }
 
       // If fingerprint is used in request, then use fingerprint in response
@@ -236,25 +235,16 @@ RequestHandler::handleAuthentication(StunMessage& request, StunMessage& response
    // Don't authenticate shared secret requests, Binding Requests or Indications (if LongTermCredentials are used)
    if((request.mClass == StunMessage::StunClassRequest && request.mMethod == StunMessage::SharedSecretMethod) ||
       (request.mClass == StunMessage::StunClassRequest && request.mMethod == StunMessage::BindMethod) ||
-      (getConfig().mAuthenticationMode == ReTurnConfig::LongTermPassword && request.mClass == StunMessage::StunClassIndication))
+      (request.mClass == StunMessage::StunClassIndication))
    {
       return true;
    }
 
    if (!request.mHasMessageIntegrity)
    {
-      if (getConfig().mAuthenticationMode == ReTurnConfig::ShortTermPassword) 
-      {
-         InfoLog(<< "Received Request with no Message Integrity. Sending 400. Sender=" << request.mRemoteTuple);
-         buildErrorResponse(response, 400, "Bad Request (no MessageIntegrity)");  
-         return false;
-      }
-      else if(getConfig().mAuthenticationMode == ReTurnConfig::LongTermPassword)
-      {
-         InfoLog(<< "Received Request with no Message Integrity. Sending 401. Sender=" << request.mRemoteTuple);
-         buildErrorResponse(response, 401, "Unauthorized (no MessageIntegrity)", getConfig().mAuthenticationRealm.c_str());  
-         return false;
-      }
+      InfoLog(<< "Received Request with no Message Integrity. Sending 401. Sender=" << request.mRemoteTuple);
+      buildErrorResponse(response, 401, "Unauthorized (no MessageIntegrity)", getConfig().mAuthenticationRealm.c_str());  
+      return false;
    }
    else
    {
@@ -265,80 +255,60 @@ RequestHandler::handleAuthentication(StunMessage& request, StunMessage& response
          return false;
       }
 
-      if(getConfig().mAuthenticationMode == ReTurnConfig::LongTermPassword)  
+      if(!request.mHasRealm)
       {
-         if(!request.mHasRealm)
-         {
-            WarningLog(<< "No Realm.  Sending 400. Sender=" << request.mRemoteTuple);
-            buildErrorResponse(response, 400, "Bad Request (No Realm)");
-            return false;
-         }
-         if(!request.mHasNonce)
-         {
-            WarningLog(<< "No Nonce and contains realm.  Sending 400. Sender=" << request.mRemoteTuple);
-            buildErrorResponse(response, 400, "Bad Request (No Nonce and contains Realm)");
-            return false;
-         }
-         switch(checkNonce(*request.mNonce))
-         {
-         case Valid:
-            // Do nothing
-            break;
-         case Expired:
-            WarningLog(<< "Nonce expired. Sending 438. Sender=" << request.mRemoteTuple);
-            buildErrorResponse(response, 438, "Stale Nonce", getConfig().mAuthenticationRealm.c_str());
-            return false;
-            break;
-         case NotValid:
-         default:
-            WarningLog(<< "Invalid Nonce. Sending 400. Sender=" << request.mRemoteTuple);
-            buildErrorResponse(response, 400, "BadRequest (Invalid Nonce)");
-            return false;
-            break;
-         }
+         WarningLog(<< "No Realm.  Sending 400. Sender=" << request.mRemoteTuple);
+         buildErrorResponse(response, 400, "Bad Request (No Realm)");
+         return false;
+      }
+      if(!request.mHasNonce)
+      {
+         WarningLog(<< "No Nonce and contains realm.  Sending 400. Sender=" << request.mRemoteTuple);
+         buildErrorResponse(response, 400, "Bad Request (No Nonce and contains Realm)");
+         return false;
+      }
+      switch(checkNonce(*request.mNonce))
+      {
+      case Valid:
+         // Do nothing
+         break;
+      case Expired:
+         WarningLog(<< "Nonce expired. Sending 438. Sender=" << request.mRemoteTuple);
+         buildErrorResponse(response, 438, "Stale Nonce", getConfig().mAuthenticationRealm.c_str());
+         return false;
+         break;
+      case NotValid:
+      default:
+         WarningLog(<< "Invalid Nonce. Sending 400. Sender=" << request.mRemoteTuple);
+         buildErrorResponse(response, 400, "BadRequest (Invalid Nonce)");
+         return false;
+         break;
       }
 
-      if(getConfig().mAuthenticationMode == ReTurnConfig::ShortTermPassword)
-      {
-         // !slg! check if username field has expired
-         // !slg! we may want to delay this check for Turn Allocations so that expired 
-         //       authentications can still be accepted for existing allocation refreshes 
-         //       and removals
-         if(0)
-         {
-            WarningLog(<< "Username expired. Sending 430. Sender=" << request.mRemoteTuple);
-            buildErrorResponse(response, 430, "Stale Credentials");
-            return false;
-         }
-      }
+      StackLog(<< "Validating username: " << *request.mUsername);  // Note: we ensure username is present above
 
-      DebugLog(<< "Validating username: " << *request.mUsername);
-
-      // !slg! need to determine whether the USERNAME contains a known entity, and in the case of a long-term
-      //       credential, known within the realm of the REALM attribute of the request
-      if (getConfig().mAuthenticationMode == ReTurnConfig::LongTermPassword && !getConfig().isUserNameValid(*request.mUsername))
+      // !slg! need to determine whether the USERNAME contains a known entity, and is known 
+      //       within the realm of the REALM attribute of the request
+      if (!getConfig().isUserNameValid(*request.mUsername, *request.mRealm))
       {
-         WarningLog(<< "Invalid username: " << *request.mUsername << ". Sending 401. Sender=" << request.mRemoteTuple);
-         buildErrorResponse(response, 401, "Unauthorized", getConfig().mAuthenticationMode == ReTurnConfig::LongTermPassword ? getConfig().mAuthenticationRealm.c_str() : 0);
+         WarningLog(<< "Invalid username '" << *request.mUsername << "' or realm '" << *request.mRealm << "' (username unknown or potential AuthorizationRealm mismatch). Sending 401. Sender=" << request.mRemoteTuple);
+         buildErrorResponse(response, 401, "Unauthorized", getConfig().mAuthenticationRealm.c_str());
          return false;
       }
 
-      DebugLog(<< "Validating MessageIntegrity");
+      StackLog(<< "Validating MessageIntegrity");
 
-      // Need to calculate HMAC across entire message - for ShortTermAuthentication we use the password
-      // as the key - for LongTermAuthentication we use username:realm:password string as the key
+      // Need to calculate HMAC across entire message - for LongTermAuthentication we use 
+      // username:realm:password string as the key
       Data hmacKey;
-      assert(request.mHasUsername);
+      resip_assert(request.mHasUsername);  // Note:  This is checked above
 
-      if(getConfig().mAuthenticationMode != ReTurnConfig::NoAuthentication)
-      {
-         request.calculateHmacKey(hmacKey, getConfig().getPasswordForUsername(*request.mUsername));
-      }
-      
+      request.calculateHmacKeyForHa1(hmacKey, getConfig().getHa1ForUsername(*request.mUsername, *request.mRealm));
+
       if(!request.checkMessageIntegrity(hmacKey))
       {
          WarningLog(<< "MessageIntegrity is bad. Sending 401. Sender=" << request.mRemoteTuple);
-         buildErrorResponse(response, 401, "Unauthorized", getConfig().mAuthenticationMode == ReTurnConfig::LongTermPassword ? getConfig().mAuthenticationRealm.c_str() : 0);
+         buildErrorResponse(response, 401, "Unauthorized", getConfig().mAuthenticationRealm.c_str());
          return false;
       }
 
@@ -478,13 +448,9 @@ RequestHandler::processTurnAllocateRequest(AsyncSocketBase* turnSocket, TurnAllo
    if(!request.mHasMessageIntegrity)
    {
       WarningLog(<< "Turn allocate request without authentication.  Sending 401. Sender=" << request.mRemoteTuple);
-      buildErrorResponse(response, 401, "Missing Message Integrity", getConfig().mAuthenticationMode == ReTurnConfig::LongTermPassword ? getConfig().mAuthenticationRealm.c_str() : 0 );  
+      buildErrorResponse(response, 401, "Missing Message Integrity", getConfig().mAuthenticationRealm.c_str());  
       return RespondFromReceiving;
    }
-
-   Data hmacKey;
-   assert(request.mHasUsername);
-   request.calculateHmacKey(hmacKey, getConfig().getPasswordForUsername(*request.mUsername));
 
    DebugLog(<< "Allocation request received: localTuple=" << request.mLocalTuple << ", remoteTuple=" << request.mRemoteTuple);
 
@@ -528,7 +494,7 @@ RequestHandler::processTurnAllocateRequest(AsyncSocketBase* turnSocket, TurnAllo
    if(request.mHasTurnDontFragment)
    {
       WarningLog(<< "Turn allocate request with Don't Fragment requested, not yet implemented.  Sending 420. Sender=" << request.mRemoteTuple);
-      buildErrorResponse(response, 420, "Don't Fragment not yet implemented", getConfig().mAuthenticationMode == ReTurnConfig::LongTermPassword ? getConfig().mAuthenticationRealm.c_str() : 0 );  
+      buildErrorResponse(response, 420, "Don't Fragment not yet implemented", getConfig().mAuthenticationRealm.c_str());  
       return RespondFromReceiving;
    }
 
@@ -619,7 +585,7 @@ RequestHandler::processTurnAllocateRequest(AsyncSocketBase* turnSocket, TurnAllo
                                       turnSocket, 
                                       request.mLocalTuple, 
                                       request.mRemoteTuple, 
-                                      StunAuth(*request.mUsername, hmacKey), 
+                                      StunAuth(*request.mUsername, response.mHmacKey), // The HMAC is already calculated and added to the response in handleAuthentication
                                       allocationTuple, 
                                       lifetime);
       if(!allocation->startRelay())
@@ -669,13 +635,9 @@ RequestHandler::processTurnRefreshRequest(TurnAllocationManager& turnAllocationM
    if(!request.mHasMessageIntegrity)
    {
       WarningLog(<< "Turn refresh request without authentication.  Sending 401. Sender=" << request.mRemoteTuple);
-      buildErrorResponse(response, 401, "Missing Message Integrity", getConfig().mAuthenticationMode == ReTurnConfig::LongTermPassword ? getConfig().mAuthenticationRealm.c_str() : 0 );  
+      buildErrorResponse(response, 401, "Missing Message Integrity", getConfig().mAuthenticationRealm.c_str());  
       return RespondFromReceiving;
    }
-
-   Data hmacKey;
-   assert(request.mHasUsername);
-   request.calculateHmacKey(hmacKey, getConfig().getPasswordForUsername(*request.mUsername));
 
    TurnAllocation* allocation = turnAllocationManager.findTurnAllocation(TurnAllocationKey(request.mLocalTuple, request.mRemoteTuple));
 
@@ -687,13 +649,13 @@ RequestHandler::processTurnRefreshRequest(TurnAllocationManager& turnAllocationM
    }
 
    // If allocation was found, then ensure that the same username and shared secret was used
-   if(allocation->getClientAuth().getClientUsername() != *request.mUsername)
+   if(allocation->getClientAuth().getClientUsername() != *request.mUsername)  // Note:  Its OK to assume that mUsername is set here, since handleAuthentication validates it
    {
       WarningLog(<< "Refresh requested with username not matching allocation.  Sending 441. Sender=" << request.mRemoteTuple);
       buildErrorResponse(response, 441, "Wrong Credentials");  
       return RespondFromReceiving;
    }
-   if(allocation->getClientAuth().getClientSharedSecret() != hmacKey)
+   if(allocation->getClientAuth().getClientSharedSecret() != response.mHmacKey) // The HMAC is already calculated and added to the response in handleAuthentication
    {
       WarningLog(<< "Refresh requested with shared secret not matching allocation.  Sending 441. Sender=" << request.mRemoteTuple);
       buildErrorResponse(response, 441, "Wrong Credentials");   
@@ -758,13 +720,9 @@ RequestHandler::processTurnCreatePermissionRequest(TurnAllocationManager& turnAl
    if(!request.mHasMessageIntegrity)
    {
       WarningLog(<< "Turn create permission request without authentication.  Send 401. Sender=" << request.mRemoteTuple);
-      buildErrorResponse(response, 401, "Missing Message Integrity", getConfig().mAuthenticationMode == ReTurnConfig::LongTermPassword ? getConfig().mAuthenticationRealm.c_str() : 0 );  
+      buildErrorResponse(response, 401, "Missing Message Integrity", getConfig().mAuthenticationRealm.c_str());  
       return RespondFromReceiving;
    }
-
-   Data hmacKey;
-   assert(request.mHasUsername);
-   request.calculateHmacKey(hmacKey, getConfig().getPasswordForUsername(*request.mUsername));
 
    TurnAllocation* allocation = turnAllocationManager.findTurnAllocation(TurnAllocationKey(request.mLocalTuple, request.mRemoteTuple));
 
@@ -776,13 +734,13 @@ RequestHandler::processTurnCreatePermissionRequest(TurnAllocationManager& turnAl
    }
 
    // If allocation was found, then ensure that the same username and shared secret was used
-   if(allocation->getClientAuth().getClientUsername() != *request.mUsername)
+   if(allocation->getClientAuth().getClientUsername() != *request.mUsername)  // Note:  Its OK to assume that mUsername is set here, since handleAuthentication validates it
    {
       WarningLog(<< "Create permission requested with username not matching allocation.  Sending 441. Sender=" << request.mRemoteTuple);
       buildErrorResponse(response, 441, "Wrong Credentials");  
       return RespondFromReceiving;
    }
-   if(allocation->getClientAuth().getClientSharedSecret() != hmacKey)
+   if(allocation->getClientAuth().getClientSharedSecret() != response.mHmacKey) // The HMAC is already calculated and added to the response in handleAuthentication
    {
       WarningLog(<< "Create permission requested with shared secret not matching allocation.  Sending 441. Sender=" << request.mRemoteTuple);
       buildErrorResponse(response, 441, "Wrong Credentials");   
@@ -821,13 +779,9 @@ RequestHandler::processTurnChannelBindRequest(TurnAllocationManager& turnAllocat
    if(!request.mHasMessageIntegrity)
    {
       WarningLog(<< "Turn channel bind request without authentication.  Send 401. Sender=" << request.mRemoteTuple);
-      buildErrorResponse(response, 401, "Missing Message Integrity", getConfig().mAuthenticationMode == ReTurnConfig::LongTermPassword ? getConfig().mAuthenticationRealm.c_str() : 0 );  
+      buildErrorResponse(response, 401, "Missing Message Integrity", getConfig().mAuthenticationRealm.c_str() );  
       return RespondFromReceiving;
    }
-
-   Data hmacKey;
-   assert(request.mHasUsername);
-   request.calculateHmacKey(hmacKey, getConfig().getPasswordForUsername(*request.mUsername));
 
    TurnAllocation* allocation = turnAllocationManager.findTurnAllocation(TurnAllocationKey(request.mLocalTuple, request.mRemoteTuple));
 
@@ -839,13 +793,13 @@ RequestHandler::processTurnChannelBindRequest(TurnAllocationManager& turnAllocat
    }
 
    // If allocation was found, then ensure that the same username and shared secret was used
-   if(allocation->getClientAuth().getClientUsername() != *request.mUsername)
+   if(allocation->getClientAuth().getClientUsername() != *request.mUsername)  // Note:  Its OK to assume that mUsername is set here, since handleAuthentication validates it
    {
       WarningLog(<< "Channel bind requested with username not matching allocation.  Sending 441. Sender=" << request.mRemoteTuple);
       buildErrorResponse(response, 441, "Wrong Credentials");  
       return RespondFromReceiving;
    }
-   if(allocation->getClientAuth().getClientSharedSecret() != hmacKey)
+   if(allocation->getClientAuth().getClientSharedSecret() != response.mHmacKey) // The HMAC is already calculated and added to the response in handleAuthentication
    {
       WarningLog(<< "Channel bind requested with shared secret not matching allocation.  Sending 441. Sender=" << request.mRemoteTuple);
       buildErrorResponse(response, 441, "Wrong Credentials");   

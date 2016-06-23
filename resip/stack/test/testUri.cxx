@@ -132,6 +132,22 @@ main(int argc, char* argv[])
 
       assert (sip1 == sip2);
       assert (sip2 == sip1);
+
+#ifdef USE_NETNS
+      cerr << "Testing NETNS" << endl;
+
+      sip1.netNs() = "ns1";
+      assert(sip1.netNs() == "ns1");
+      assert(!(sip1 == sip2));
+      assert(!(sip2 == sip1));
+      Uri sip3(sip1);
+      assert(sip1 == sip3);
+      assert(!(sip2 == sip3));
+      assert(!(sip3 == sip2));
+      sip2 = sip1;
+      assert(sip1 == sip2);
+      assert(sip2 == sip1);
+#endif
    }
 
    {
@@ -676,6 +692,20 @@ main(int argc, char* argv[])
       telSub.param(p_extension)="4545";
       uri.setUserAsTelephoneSubscriber(telSub);
       assert(Data::from(uri) == "sip:+1-(234)-00442031111111;ext=4545@lvdx.com");
+   }
+
+   {
+      Uri uri = Uri("/");
+      assert(uri.path() == "/");
+      assert(Data::from(uri) == "/");
+   }
+
+   {
+      Uri uri = Uri("/;p1=123;p2=456");
+      assert(uri.path() == "/");
+      assert(uri.param(UnknownParameterType("p1")) == Data("123"));
+      assert(uri.param(UnknownParameterType("p2")) == Data("456"));
+      assert(Data::from(uri) == "/;p1=123;p2=456");
    }
    cerr << endl << "All OK" << endl;
    return 0;

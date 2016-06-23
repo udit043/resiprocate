@@ -5,6 +5,7 @@
 #ifdef USE_SSL
 
 #include <memory>
+#include <stdexcept>
 
 #include "rutil/compat.hxx"
 #include "rutil/Data.hxx"
@@ -32,7 +33,10 @@ TlsBaseTransport::TlsBaseTransport(Fifo<TransactionMessage>& fifo,
                            Compression &compression,
                            unsigned transportFlags,
                            SecurityTypes::TlsClientVerificationMode cvm,
-                           bool useEmailAsSIP) :
+                           bool useEmailAsSIP,
+                           const Data& certificateFilename, 
+                           const Data& privateKeyFilename,
+                           const Data& privateKeyPassPhrase) :
    TcpBaseTransport(fifo, portNum, version, interfaceObj, socketFunc, compression, transportFlags),
    mSecurity(&security),
    mSslType(sslType),
@@ -49,13 +53,18 @@ TlsBaseTransport::TlsBaseTransport(Fifo<TransactionMessage>& fifo,
    // otherwise we will use the SSL Ctx or TLS Ctx created in the Security class
    if(!sipDomain.empty())
    {
-      if (sslType == SecurityTypes::SSLv23)
+      switch(sslType)
       {
-         mDomainCtx = mSecurity->createDomainCtx(SSLv23_method(), sipDomain);
-      }
-      else
-      {
-         mDomainCtx = mSecurity->createDomainCtx(TLSv1_method(), sipDomain);
+      case SecurityTypes::SSLv23:
+         DebugLog(<<"Using SSLv23_method");
+         mDomainCtx = mSecurity->createDomainCtx(SSLv23_method(), sipDomain, certificateFilename, privateKeyFilename, privateKeyPassPhrase);
+         break;
+      case SecurityTypes::TLSv1:
+         DebugLog(<<"Using TLSv1_method");
+         mDomainCtx = mSecurity->createDomainCtx(TLSv1_method(), sipDomain, certificateFilename, privateKeyFilename, privateKeyPassPhrase);
+         break;
+      default:
+         throw invalid_argument("Unrecognised SecurityTypes::SSLType value");
       }
    }
 }
@@ -74,19 +83,41 @@ TlsBaseTransport::getCtx() const
 { 
    if(mDomainCtx)
    {
+      DebugLog(<<"Using TlsDomain-transport SSL_CTX");
       return mDomainCtx;
    }
    else if(mSslType == SecurityTypes::SSLv23)
    {
+      DebugLog(<<"Using SSLv23_method");
       return mSecurity->getSslCtx();
    }
+   DebugLog(<<"Using TLSv1_method");
    return mSecurity->getTlsCtx();
+}
+
+bool
+TlsBaseTransport::setPeerCertificateVerificationCallback(
+   SecurityTypes::SSLVendor vendor, void *func, void *arg)
+{
+   // Only OpenSSL is supported at present
+   if(vendor != SecurityTypes::OpenSSL)
+   {
+      ErrLog(<<"refusing to set SSL callback for unknown SSL stack vendor");
+      return false;
+   }
+
+   // For full details of this callback see:
+   // https://www.openssl.org/docs/ssl/SSL_CTX_set_cert_verify_callback.html
+   SSL_CTX_set_cert_verify_callback(getCtx(),
+      (int (*)(X509_STORE_CTX *,void *))func, arg);
+
+   return true;
 }
 
 Connection* 
 TlsBaseTransport::createConnection(const Tuple& who, Socket fd, bool server)
 {
-   assert(this);
+   resip_assert(this);
    Connection* conn = new TlsConnection(this,who, fd, mSecurity, server,
                                         tlsDomain(), mSslType, mCompression );
    return conn;

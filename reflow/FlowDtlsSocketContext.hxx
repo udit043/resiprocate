@@ -2,13 +2,18 @@
 #include "config.h"
 #endif
 
-#ifdef USE_SSL
-
 #if !defined(FlowDtlsSocketContext_hxx)
 #define FlowDtlsSocketContext_hxx 
 
 #include <asio.hpp>
+#ifdef USE_SSL
+#include <asio/ssl.hpp>
+#endif
+#ifdef WIN32
 #include <srtp.h>
+#else
+#include <srtp/srtp.h>
+#endif
 
 #include "dtls_wrapper/DtlsSocket.hxx"
 #include "Flow.hxx"
@@ -58,8 +63,6 @@ private:
 }
 
 #endif
-
-#endif //USE_SSL
 /* ====================================================================
 
  Copyright (c) 2007-2008, Plantronics, Inc.

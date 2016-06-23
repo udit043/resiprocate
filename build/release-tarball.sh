@@ -9,7 +9,7 @@
 #
 # - at the moment, the supported platform for official bootstraps
 #
-#                Debian 6.0 (squeeze)
+#                Debian 8.0 (jessie)
 #
 # - to avoid errors about the `zip' and `compress' commands, run
 #   the following:
@@ -25,10 +25,17 @@ autoreconf --install && \
   ./configure --with-ssl \
               --with-c-ares \
               --with-mysql \
-              --with-radius \
-              --with-b2bua \
+              --with-postgresql \
+              --with-freeradius \
+              --with-repro \
+              --enable-repro-plugins \
+              --with-python \
+                DEPS_PYTHON_CFLAGS="`/usr/bin/python2.7-config --cflags`" \
+                DEPS_PYTHON_LIBS="`/usr/bin/python2.7-config --ldflags`" \
+                PYCXX_SRCDIR=/usr/share/python2.7/CXX/Python2 \
               --with-tfm \
               --with-apps \
+              --with-telepathy \
               --with-ichat-gw \
               --with-recon \
               --with-p2p && \

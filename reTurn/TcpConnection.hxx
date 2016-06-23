@@ -2,6 +2,9 @@
 #define TCP_CONNECTION_HXX
 
 #include <asio.hpp>
+#ifdef USE_SSL
+#include <asio/ssl.hpp>
+#endif
 #include <boost/array.hpp>
 #include <boost/noncopyable.hpp>
 #include <boost/shared_ptr.hpp>
@@ -53,6 +56,10 @@ protected:
 
    /// The handler used to process the incoming request.
    RequestHandler& mRequestHandler;
+
+   // Stores the local address and port
+   asio::ip::address mLocalAddress;
+   unsigned short mLocalPort;
 
 private:
 };

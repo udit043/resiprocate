@@ -1,4 +1,4 @@
-#include <cassert>
+#include "rutil/ResipAssert.h"
 
 #include "resip/stack/Helper.hxx"
 #include "resip/stack/SipMessage.hxx"
@@ -24,8 +24,10 @@ ClientPublication::ClientPublication(DialogUsageManager& dum,
                                      DialogSet& dialogSet,
                                      SharedPtr<SipMessage> req)
    : NonDialogUsage(dum, dialogSet),
+     mPublished(false),
      mWaitingForResponse(false),
      mPendingPublish(false),
+     mPendingEnd(false),
      mPublish(req),
      mEventType(req->header(h_Event).value()),
      mTimerSeq(0),
@@ -50,14 +52,28 @@ ClientPublication::end()
 void
 ClientPublication::end(bool immediate)
 {
-   InfoLog (<< "End client publication to " << mPublish->header(h_RequestLine).uri());
-   if(!immediate)
+   if (immediate)
    {
+      InfoLog(<< "End client publication immediately to " << mPublish->header(h_RequestLine).uri());
+      delete this;
+      return;
+   }
+   if (mWaitingForResponse)
+   {
+      InfoLog(<< "Waiting for response, pending End of client publication to " << mPublish->header(h_RequestLine).uri());
+      mPendingEnd = true;
+      return;
+   }
+   if (mPublished)
+   {
+      InfoLog(<< "End client publication to " << mPublish->header(h_RequestLine).uri());
       mPublish->header(h_Expires).value() = 0;
+      mPublish->releaseContents();
       send(mPublish);
    }
    else
    {
+      InfoLog(<< "End client publication immediately (not published) to " << mPublish->header(h_RequestLine).uri());
       delete this;
    }
 }
@@ -68,7 +84,6 @@ public:
    ClientPublicationEndCommand(const ClientPublicationHandle& clientPublicationHandle, bool immediate)
       : mClientPublicationHandle(clientPublicationHandle), mImmediate(immediate)
    {
-
    }
 
    virtual void executeCommand()
@@ -98,7 +113,7 @@ void
 ClientPublication::dispatch(const SipMessage& msg)
 {
    ClientPublicationHandler* handler = mDum.getClientPublicationHandler(mEventType);
-   assert(handler);   
+   resip_assert(handler);   
 
    if (msg.isRequest())
    {
@@ -112,11 +127,12 @@ ClientPublication::dispatch(const SipMessage& msg)
          return;
       }
 
-      assert(code >= 200);
+      resip_assert(code >= 200);
       mWaitingForResponse = false;
 
       if (code < 300)
       {
+         mPublished = true;
          if (mPublish->exists(h_Expires) && mPublish->header(h_Expires).value() == 0)
          {
             handler->onRemove(getHandle(), msg);
@@ -128,7 +144,7 @@ ClientPublication::dispatch(const SipMessage& msg)
             mPublish->header(h_SIPIfMatch) = msg.header(h_SIPETag);
             if(!mPendingPublish)
             {
-               mPublish->releaseContents();           
+               mPublish->releaseContents();
             }
             mDum.addTimer(DumTimeout::Publication, 
                           Helper::aBitSmallerThan(msg.header(h_Expires).value()), 
@@ -170,7 +186,7 @@ ClientPublication::dispatch(const SipMessage& msg)
             }
          }
          else if (code == 408 ||
-                  (code == 503 && msg.getReceivedTransport() == 0) ||
+                  (code == 503 && !msg.isFromWire()) ||
                   ((code == 404 ||
                     code == 413 ||
                     code == 480 ||
@@ -211,7 +227,6 @@ ClientPublication::dispatch(const SipMessage& msg)
                              getBaseHandle(),
                              ++mTimerSeq);       
                return;
-               
             }
          }
          else
@@ -220,10 +235,26 @@ ClientPublication::dispatch(const SipMessage& msg)
             delete this;
             return;
          }
-
       }
 
-      if (mPendingPublish)
+      if (mPendingEnd)
+      {
+         mPendingEnd = false;
+         if (mPublished)
+         {
+            mPublish->header(h_Expires).value() = 0;
+            mPublish->releaseContents();
+            InfoLog(<< "Sending pending end PUBLISH: " << mPublish->brief());
+            send(mPublish);
+         }
+         else
+         {
+             InfoLog(<< "Pending end PUBLISH, but not published, so ending immediately: " << mPublish->brief());
+             delete this;
+             return;
+         }
+      }
+      else if (mPendingPublish)
       {
          InfoLog (<< "Sending pending PUBLISH: " << mPublish->brief());
          send(mPublish);
@@ -243,9 +274,9 @@ ClientPublication::dispatch(const DumTimeout& timer)
 void
 ClientPublication::refresh(unsigned int expiration)
 {
-   if (expiration == 0 && mPublish->exists(h_Expires))
+   if (expiration != 0)
    {
-      expiration = mPublish->header(h_Expires).value();
+       mPublish->header(h_Expires).value() = expiration;
    }
    send(mPublish);
 }
@@ -257,7 +288,6 @@ public:
       : mClientPublicationHandle(clientPublicationHandle),
         mExpiration(expiration)
    {
-
    }
 
    virtual void executeCommand()
@@ -313,7 +343,6 @@ public:
       : mClientPublicationHandle(clientPublicationHandle),
       mBody(body?body->clone():0)
    {
-
    }
 
    virtual void executeCommand()
