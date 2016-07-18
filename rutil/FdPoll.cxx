@@ -5,14 +5,12 @@
 #include "rutil/FdSetIOObserver.hxx"
 #include "rutil/Logger.hxx"
 #include "rutil/BaseException.hxx"
-#include "rutil/Errdes.hxx"
 
 #include <vector>
 
 #ifdef RESIP_POLL_IMPL_EPOLL
 #  include <sys/epoll.h>
 #endif
-
 
 using namespace resip;
 #define RESIPROCATE_SUBSYSTEM Subsystem::SIP
@@ -343,7 +341,7 @@ FdPollImplFdSet::waitAndProcess(int ms)
       int err = getErrno();
       if ( err!=EINTR )
       {
-         CritLog(<<"select() failed: "<<errortostringOS(err));
+         CritLog(<<"select() failed: "<<strerror(err));
          resip_assert(0);     // .kw. not sure correct behavior...
       }
       return false;
@@ -744,7 +742,7 @@ FdPollImplPoll::waitAndProcess(int ms)
       int err = getErrno();
       if ( err != EINTR )
       {
-         CritLog(<<"poll() failed: " << err << " " << errortostringOS(err));
+         CritLog(<<"poll() failed: " << err << " " << strerror(err));
          resip_assert(0);     // .kw. not sure correct behavior...
       }
       return false;
@@ -798,7 +796,7 @@ FdPollImplPoll::waitAndProcess(int ms)
          int err = getErrno();
          if (err != EINTR)
          {
-            CritLog(<<"select() failed: "<<errortostringOS(err));
+            CritLog(<<"select() failed: "<<strerror(err));
             resip_assert(0);     // .kw. not sure correct behavior...
          }
       }
@@ -897,7 +895,7 @@ FdPollImplEpoll::FdPollImplEpoll() :
    int sz = 200;        // ignored
    if ( (mEPollFd = epoll_create(sz)) < 0 )
    {
-      CritLog(<<"epoll_create() failed: "<<errortostringOS(errno));
+      CritLog(<<"epoll_create() failed: "<<strerror(errno));
       abort();
    }
    mEvCache.resize(sz);
@@ -967,7 +965,7 @@ FdPollImplEpoll::addPollItem(Socket fd, FdPollEventMask newMask, FdPollItemIf *i
    ev.data.fd = fd;
    if (epoll_ctl(mEPollFd, EPOLL_CTL_ADD, fd, &ev) < 0)
    {
-      CritLog(<<"epoll_ctl(ADD) failed: " << errortostringOS(errno));
+      CritLog(<<"epoll_ctl(ADD) failed: " << strerror(errno));
       abort();
    }
    return IMPL_EPOLL_FdToHandle(fd);
@@ -986,7 +984,7 @@ FdPollImplEpoll::modPollItem(const FdPollItemHandle handle, FdPollEventMask newM
    ev.data.fd = fd;
    if (epoll_ctl(mEPollFd, EPOLL_CTL_MOD, fd, &ev) < 0)
    {
-      CritLog(<<"epoll_ctl(MOD) failed: "<<errortostringOS(errno));
+      CritLog(<<"epoll_ctl(MOD) failed: "<<strerror(errno));
       abort();
    }
 }
@@ -1001,7 +999,7 @@ FdPollImplEpoll::delPollItem(FdPollItemHandle handle)
    mItems[fd] = NULL;
    if (epoll_ctl(mEPollFd, EPOLL_CTL_DEL, fd, NULL) < 0)
    {
-       CritLog(<<"epoll_ctl(DEL) fd="<<fd<<" failed: " << errortostringOS(errno));
+       CritLog(<<"epoll_ctl(DEL) fd="<<fd<<" failed: " << strerror(errno));
            abort();
    }
    killCache(fd);
@@ -1112,7 +1110,7 @@ FdPollImplEpoll::waitAndProcess(int ms)
          int err = getErrno();
          if ( err!=EINTR )
          {
-            CritLog(<<"select() failed: "<<errortostringOS(err));
+            CritLog(<<"select() failed: "<<strerror(err));
             resip_assert(0);     // .kw. not sure correct behavior...
          }
          return false;
@@ -1185,7 +1183,7 @@ FdPollImplEpoll::epollWait(int waitMs)
          }
          else
          {
-            CritLog(<<"epoll_wait() failed: " << errortostringOS(errno));
+            CritLog(<<"epoll_wait() failed: " << strerror(errno));
             abort();   // TBD: just throw instead?
          }
       }

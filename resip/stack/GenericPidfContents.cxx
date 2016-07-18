@@ -12,7 +12,6 @@
 #include "rutil/Logger.hxx"
 #include "rutil/Inserter.hxx"
 #include "rutil/WinLeakCheck.hxx"
-#include "rutil/Errdes.hxx"
 
 using namespace resip;
 using namespace std;
@@ -813,7 +812,7 @@ GenericPidfContents::generateTimestampData(time_t datetime)
    if (gmtp == 0)
    {
       int e = getErrno();
-      DebugLog(<< "Failed to convert to gmt: " << errortostringOS(e));
+      DebugLog(<< "Failed to convert to gmt: " << strerror(e));
       return Data::Empty;
    }
    memcpy(&gmt, gmtp, sizeof(gmt));
@@ -821,7 +820,7 @@ GenericPidfContents::generateTimestampData(time_t datetime)
    if (gmtime_r(&datetime, &gmt) == 0)
    {
       int e = getErrno();
-      DebugLog(<< "Failed to convert to gmt: " << errortostringOS(e));
+      DebugLog(<< "Failed to convert to gmt: " << strerror(e));
       return Data::Empty;
    }
 #endif
