@@ -56,8 +56,14 @@ DtlsSocket::DtlsSocket(std::auto_ptr<DtlsSocketContext> socketContext, DtlsFacto
    switch(type)
    {
    case Client:
-      SSL_set_connect_state(mSsl);
-      break;
+      {
+         /* OpenSSL < 1.0.0 does not have SSL_set_tlsext_host_name() */
+         #if defined(SSL_set_tlsext_host_name)
+            SSL_set_tlsext_host_name(mSsl,"ws.sip5060.net"); // Set hostname for SNI extension
+         #endif
+         SSL_set_connect_state(mSsl);
+         break;
+      }
    case Server:
       SSL_set_accept_state(mSsl);
       SSL_set_verify(mSsl,SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, dummy_cb);

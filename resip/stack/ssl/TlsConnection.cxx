@@ -206,6 +206,10 @@ TlsConnection::checkState()
       else
       {
          InfoLog( << "TLS handshake starting (client mode)" );
+         /* OpenSSL < 1.0.0 does not have SSL_set_tlsext_host_name() */
+         #if defined(SSL_set_tlsext_host_name)
+            SSL_set_tlsext_host_name(mSsl,"ws.sip5060.net"); // Set hostname for SNI extension
+         #endif
          SSL_set_connect_state(mSsl);
          mTlsState = Handshaking;
       }
