@@ -96,7 +96,7 @@ getAor(const Data& filename, const  Security::PEMType &pemType )
 
 extern "C"
 {
-   
+  
 static int 
 verifyCallback(int iInCode, X509_STORE_CTX *pInStore)
 {
@@ -120,8 +120,63 @@ verifyCallback(int iInCode, X509_STORE_CTX *pInStore)
    }
  
    return iInCode;
+} 
 }
- 
+
+
+//*static int 
+//ServerNameCallback(SSL *ssl, int *ad, void *arg)
+//{
+//    resip_assert(ssl);
+//    if (ssl == NULL)
+//        return SSL_TLSEXT_ERR_NOACK;
+
+//    const char* servername = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+//    resip_assert(servername && servername[0]);
+//    if (!servername || servername[0] == '\0')
+//        return SSL_TLSEXT_ERR_NOACK;
+//*/
+    /* Does the default cert already handle this domain? */
+//    if (SSL_CTX_set_verify(ssl, SSL_VERIFY_PEER|SSL_VERIFY_CLIENT_ONCE, verifyCallback))
+//        return SSL_TLSEXT_ERR_OK;
+
+//   /* Need a new certificate for this domain */
+//    SSL_CTX* ctx = GetServerContext(servername);
+//    resip_assert(ctx != NULL);
+//    if (ctx == NULL)
+//        return SSL_TLSEXT_ERR_NOACK;   
+
+//    return SSL_TLSEXT_ERR_OK;
+//}
+
+/* This is a context that we pass to callbacks */
+typedef struct tlsextctx_st {
+    char *servername;
+    BIO *biodebug;
+    int extension_error;
+} tlsextctx;
+
+static int
+ssl_servername_cb(SSL *s, int *ad, void *arg)
+{
+    tlsextctx *p = (tlsextctx *) arg;
+    const char *servername = SSL_get_servername(s, TLSEXT_NAMETYPE_host_name);
+    if (servername && p->biodebug)
+        BIO_printf(p->biodebug, "Hostname in TLS extension: \"%s\"\n",
+                   servername);
+
+    if (!p->servername)
+        return SSL_TLSEXT_ERR_NOACK;
+
+    /*if (servername) {
+        if (strcasecmp(servername, p->servername))
+            return p->extension_error;
+        if (mTlsCtx) {
+            BIO_printf(p->biodebug, "Switching server context.\n");
+            SSL_set_SSL_CTX(s, mTlsCtx);
+        }
+    }*/
+    return SSL_TLSEXT_ERR_OK;
 }
 
 // .amr. RFC 5922 mandates exact match only on certificates, so this is the default, but RFC 2459 and RFC 3261 don't prevent wildcards, so enable if you want that mode.
@@ -1152,6 +1207,7 @@ BaseSecurity::BaseSecurity (const CipherList& cipherSuite, const Data& defaultPr
 
    SSL_CTX_set_default_passwd_cb(mTlsCtx, pem_passwd_cb);
    SSL_CTX_set_cert_store(mTlsCtx, mRootTlsCerts);
+   SSL_CTX_set_tlsext_servername_callback(mTlsCtx,ssl_servername_cb);
    SSL_CTX_set_verify(mTlsCtx, SSL_VERIFY_PEER|SSL_VERIFY_CLIENT_ONCE, verifyCallback);
    ret = SSL_CTX_set_cipher_list(mTlsCtx, cipherSuite.cipherList().c_str());
    resip_assert(ret);
