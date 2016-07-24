@@ -56,10 +56,8 @@ DtlsSocket::DtlsSocket(std::auto_ptr<DtlsSocketContext> socketContext, DtlsFacto
    switch(type)
    {
    case Client:
-      {
-         SSL_set_connect_state(mSsl);
-         break;
-      }
+      SSL_set_connect_state(mSsl);
+      break;
    case Server:
       SSL_set_accept_state(mSsl);
       SSL_set_verify(mSsl,SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, dummy_cb);
