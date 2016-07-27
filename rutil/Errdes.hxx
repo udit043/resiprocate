@@ -25,16 +25,16 @@ public:
 		switch(ClassCode)
 		{
 			case 1:
-                  {
-                     #ifdef _WIN32
-                        result = WinErrorMsg[Error];
+                  	{
+                     		#ifdef _WIN32
+                        	   result = WinErrorMsg[Error];
                        
-                     #elif __linux__
-                        result = ErrornoErrorMsg[Error];
+                     		#elif __linux__
+                        	   result = ErrornoErrorMsg[Error];
 
-                     #endif
-			   break;
-                  }
+                     		#endif
+			     	break;
+                  	}
 			case 2:
 			result = OpenSSLErrorMsg[Error];
 			break;
@@ -74,7 +74,7 @@ public:
 	}
 };
 
-      ErrnoError WinObj;
+        ErrnoError WinObj;
 	ErrnoError ErrornoObj;
 	OpenSSLError OpenSSLObj;
 	X509Error X509Obj;
@@ -83,7 +83,7 @@ public:
 
 	string ErrorCode[134] = 
 	{
-	  	"No error","EPERM","ENOENT","ESRCH","EINTR","EIO","ENXIO","E2BIG","ENOEXEC","EBADF","ECHILD","EAGAIN","ENOMEM","EACCES","EFAULT",
+	"No error","EPERM","ENOENT","ESRCH","EINTR","EIO","ENXIO","E2BIG","ENOEXEC","EBADF","ECHILD","EAGAIN","ENOMEM","EACCES","EFAULT",
       	"ENOTBLK","EBUSY","EEXIST","EXDEV","ENODEV","ENOTDIR","EISDIR","EINVAL","ENFILE","EMFILE","ENOTTY","ETXTBSY","EFBIG",
       	"ENOSPC","ESPIPE","EROFS","EMLINK","EPIPE","EDOM","ERANGE","EDEADLK","ENAMETOOLONG","ENOLCK","ENOSYS","ENOTEMPTY","ELOOP",
       	"EWOULDBLOCK","ENOMSG","EIDRM","ECHRNG","EL2NSYNC","EL3HLT","EL3RST","ELNRNG","EUNATCH","ENOCSI","EL2HLT","EBADE","EBADR",
@@ -99,8 +99,8 @@ public:
 
 	string ErrorString[134] = 
 	{
-	  	"No error 0",
-	  	"EPERM (Operation not permitted) 1",
+	"No error 0",
+	"EPERM (Operation not permitted) 1",
       	"ENOENT (No such file or directory) 2",
       	"ESRCH (No such process) 3",
       	"EINTR (Interrupted system call) 4",
@@ -244,28 +244,28 @@ public:
 
 	string OpenSSLCode[9] =
 	{
-		"SSL_ERROR_NONE",
-		"SSL_ERROR_SSL",
-		"SSL_ERROR_WANT_READ",
-		"SSL_ERROR_WANT_WRITE",
-		"SSL_ERROR_WANT_X509_LOOKUP",
-		"SSL_ERROR_SYSCALL",
-		"SSL_ERROR_ZERO_RETURN",
-		"SSL_ERROR_WANT_CONNECT",
-		"SSL_ERROR_WANT_ACCEPT",
+	"SSL_ERROR_NONE",
+	"SSL_ERROR_SSL",
+	"SSL_ERROR_WANT_READ",
+	"SSL_ERROR_WANT_WRITE",
+	"SSL_ERROR_WANT_X509_LOOKUP",
+	"SSL_ERROR_SYSCALL",
+	"SSL_ERROR_ZERO_RETURN",
+	"SSL_ERROR_WANT_CONNECT",
+	"SSL_ERROR_WANT_ACCEPT",
 	};
 
 	string OpenSSLString[9] =
 	{
-		"SSL_ERROR_NONE 0",
-		"SSL_ERROR_SSL 1",
-		"SSL_ERROR_WANT_READ 2",
-		"SSL_ERROR_WANT_WRITE 3",
-		"SSL_ERROR_WANT_X509_LOOKUP 4",
-		"SSL_ERROR_SYSCALL 5",
-		"SSL_ERROR_ZERO_RETURN 6",
-		"SSL_ERROR_WANT_CONNECT 7",
-		"SSL_ERROR_WANT_ACCEPT 8",
+	"SSL_ERROR_NONE 0",
+	"SSL_ERROR_SSL 1",
+	"SSL_ERROR_WANT_READ 2",
+	"SSL_ERROR_WANT_WRITE 3",
+	"SSL_ERROR_WANT_X509_LOOKUP 4",
+	"SSL_ERROR_SYSCALL 5",
+	"SSL_ERROR_ZERO_RETURN 6",
+	"SSL_ERROR_WANT_CONNECT 7",
+	"SSL_ERROR_WANT_ACCEPT 8",
 	};
 
 /*    for (int i = 0; i < 9; ++i)
