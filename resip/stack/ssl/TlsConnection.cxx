@@ -211,7 +211,7 @@ TlsConnection::checkState()
             char* servername;
             servername = (char *)malloc((who().getTargetDomain().size() + 1) * sizeof *servername);
             strcpy(servername,who().getTargetDomain().data());
-            SSL_set_tlsext_host_name(mSsl,servername); // Set hostname for SNI extension // or who().getTargetDomain().c_str();
+            SSL_set_tlsext_host_name(mSsl,servername); // Set hostname for SNI extension // or SSL_set_tlsext_host_name(mSsl,who().getTargetDomain().c_str());
             DebugLog ( << "server name:" <<servername);
          #endif
          SSL_set_connect_state(mSsl);
@@ -361,13 +361,12 @@ TlsConnection::checkState()
                  << who().getTargetDomain()
                  << "> remote cert domain(s) are <" 
                  << getPeerNamesData() << ">" );
-         
          mFailureReason = TransportFailure::CertNameMismatch;         
          return mTlsState;
       }
    }
 
-   InfoLog( << "TLS handshake done for peer " << getPeerNamesData());
+   InfoLog( << "TLS handshake done for peer " << getPeerNamesData()); 
    mTlsState = Up;
    if (!mOutstandingSends.empty())
    {
