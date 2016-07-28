@@ -208,7 +208,11 @@ TlsConnection::checkState()
          InfoLog( << "TLS handshake starting (client mode)" );
          /* OpenSSL < 1.0.0 does not have SSL_set_tlsext_host_name() */
          #if defined(SSL_set_tlsext_host_name)
-            SSL_set_tlsext_host_name(mSsl,"ws.sip5060.net"); // Set hostname for SNI extension //who().getTargetDomain()
+            char* servername;
+            servername = (char *)malloc((who().getTargetDomain().size() + 1) * sizeof *servername);
+            strcpy(servername,who().getTargetDomain().data());
+            SSL_set_tlsext_host_name(mSsl,servername); // Set hostname for SNI extension // or who().getTargetDomain().c_str();
+            DebugLog ( << "server name:" <<servername);
          #endif
          SSL_set_connect_state(mSsl);
          mTlsState = Handshaking;
@@ -357,12 +361,13 @@ TlsConnection::checkState()
                  << who().getTargetDomain()
                  << "> remote cert domain(s) are <" 
                  << getPeerNamesData() << ">" );
+         
          mFailureReason = TransportFailure::CertNameMismatch;         
          return mTlsState;
       }
    }
 
-   InfoLog( << "TLS handshake done for peer " << getPeerNamesData()); 
+   InfoLog( << "TLS handshake done for peer " << getPeerNamesData());
    mTlsState = Up;
    if (!mOutstandingSends.empty())
    {
