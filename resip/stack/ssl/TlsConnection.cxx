@@ -208,11 +208,8 @@ TlsConnection::checkState()
          InfoLog( << "TLS handshake starting (client mode)" );
          /* OpenSSL < 1.0.0 does not have SSL_set_tlsext_host_name() */
          #if defined(SSL_set_tlsext_host_name)
-            char* servername;
-            servername = (char *)malloc((who().getTargetDomain().size() + 1) * sizeof *servername);
-            strcpy(servername,who().getTargetDomain().data());
-            SSL_set_tlsext_host_name(mSsl,servername); // Set hostname for SNI extension // or SSL_set_tlsext_host_name(mSsl,who().getTargetDomain().c_str());
-            DebugLog ( << "server name:" <<servername);
+            SSL_set_tlsext_host_name(mSsl,who().getTargetDomain().c_str()); // set the SNI hostname 
+            DebugLog ( << "TLS SNI extension in Client Hello: " << who().getTargetDomain().c_str());
          #endif
          SSL_set_connect_state(mSsl);
          mTlsState = Handshaking;

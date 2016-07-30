@@ -468,7 +468,7 @@ void DtlsTransport::_write( FdSet& fdset )
 
 
       InfoLog( << "DTLS handshake starting (client mode)" );
-      
+
       SSL_set_connect_state( ssl ) ;
 
       wBio = BIO_new_dgram( (int)mFd, BIO_NOCLOSE ) ;
