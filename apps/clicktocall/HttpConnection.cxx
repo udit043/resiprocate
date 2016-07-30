@@ -8,7 +8,6 @@
 #include <resip/stack/Tuple.hxx>
 #include <rutil/DnsUtil.hxx>
 #include <rutil/ParseBuffer.hxx>
-#include "rutil/Errdes.hxx"
 
 #include "Version.hxx"
 #include "AppSubsystem.hxx"
@@ -31,7 +30,7 @@ HttpConnection::HttpConnection( HttpBase& base, resip::Socket pSock ):
    mSock(pSock),
    mParsedRequest(false)
 {
-   resip_assert( mSock > 0 );
+	resip_assert( mSock > 0 );
 }
 
 
@@ -236,10 +235,10 @@ HttpConnection::processSomeReads()
             InfoLog (<< "buf is outside your accessible address space.");
             break;
          default:
-            InfoLog (<< "Some other error: " << e << " error message: " << errortostringOS(e) );
+            InfoLog (<< "Some other error");
             break;
       }
-      InfoLog (<< "Failed read on " << (int)mSock << " " << strerror(e) << " error message from Errdes.hxx file: " << errortostringOS(e) );
+      InfoLog (<< "Failed read on " << (int)mSock << " " << strerror(e));
       return false;
    }
    else if (bytesRead == 0)
@@ -348,7 +347,7 @@ HttpConnection::processSomeWrites()
    if (bytesWritten == INVALID_SOCKET)
    {
       int e = getErrno();
-      InfoLog (<< "HttpConnection failed write on " << mSock << " " << strerror(e) << " error message from Errdes.hxx file " << errortostringOS(e) );
+      InfoLog (<< "HttpConnection failed write on " << mSock << " " << strerror(e));
 
       return false;
    }

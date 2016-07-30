@@ -6,7 +6,6 @@
 #include "rutil/Socket.hxx"
 #include "resip/stack/TcpConnection.hxx"
 #include "resip/stack/Tuple.hxx"
-#include "rutil/Errdes.hxx"
 
 using namespace resip;
 
@@ -59,11 +58,11 @@ TcpConnection::read( char* buf, int count )
             ErrLog (<< "buf is outside your accessible address space.");
             break;
          default:
-            ErrLog (<< "Some other error, code = " << e << " error message : " << errortostringOS(e) );
+            ErrLog (<< "Some other error, code = " << e);
             break;
       }
 
-      InfoLog (<< "Failed read on " << getSocket() << " " << errortostringOS(e));
+      InfoLog (<< "Failed read on " << getSocket() << " " << strerror(e));
       Transport::error(e);
       setFailureReason(TransportFailure::ConnectionException, e+2000);
       return -1;
@@ -101,7 +100,7 @@ TcpConnection::write( const char* buf, const int count )
           // TCP buffers are backed up - we couldn't write anything - but we shouldn't treat this an error - return we wrote 0 bytes
           return 0;
       }
-      InfoLog (<< "Failed write on " << getSocket() << " " << errortostringOS(e));
+      InfoLog (<< "Failed write on " << getSocket() << " " << strerror(e));
       Transport::error(e);
       return -1;
    }
