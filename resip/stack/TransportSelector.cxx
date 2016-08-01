@@ -50,10 +50,15 @@
 #include "resip/stack/ssl/Security.hxx"
 #include "resip/stack/ssl/TlsTransport.hxx"
 #include "resip/stack/ssl/WssTransport.hxx"
+
+#include <openssl/ssl.h>
+#include <openssl/x509.h>
 #endif
 
 #ifdef WIN32
 #include "rutil/WinCompat.hxx"
+#include <winsock.h>
+#include <windows.h>
 #endif
 
 #ifdef __MINGW32__
@@ -61,6 +66,7 @@
 #endif
 
 #include <sys/types.h>
+#include <rutil/Errdes.hxx>
 
 using namespace resip;
 
@@ -710,6 +716,23 @@ TransportSelector::findTransportByVia(SipMessage* msg, const Tuple& target, Tupl
 Tuple
 TransportSelector::determineSourceInterface(SipMessage* msg, const Tuple& target) const
 {
+
+   NumericError search;
+   #ifdef _WIN32
+      ErrnoError WinObj;
+   #endif
+   ErrnoError ErrornoObj;
+   X509Error X509Obj;
+   OpenSSLError OpenSSLObj;
+   
+   #ifdef _WIN32
+      WinObj.CreateMappingErrorMsg();
+   #endif
+   ErrornoObj.CreateMappingErrorMsg();
+   X509Obj.CreateMappingErrorMsg();
+   OpenSSLObj.CreateMappingErrorMsg();
+
+
    resip_assert(msg->exists(h_Vias));
    resip_assert(!msg->header(h_Vias).empty());
    const Via& via = msg->header(h_Vias).front();
@@ -779,7 +802,7 @@ TransportSelector::determineSourceInterface(SipMessage* msg, const Tuple& target
       {
          int e = getErrno();
          Transport::error( e );
-         InfoLog(<< "Unable to route to " << target << " : [" << e << "] " << strerror(e) );
+         InfoLog(<< "Unable to route to " << target << " : [" << e << "] " << search.SearchErrorMsg(e,1) );
          throw Transport::Exception("Can't find source address for Via", __FILE__,__LINE__);
       }
 
