@@ -15,7 +15,7 @@ class AbstractError
 class NumericError : public AbstractError
 {
 public:
-	string SearchErrorMsg(int Error, int ClassCode);
+	string SearchErrorMsg(string Error, int ClassCode);
 };
 
 class ErrnoError : public NumericError
