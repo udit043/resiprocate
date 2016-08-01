@@ -5,6 +5,9 @@
 #include <map>
 #include <string>
 #include <errno.h>
+#include <openssl/ssl.h>
+#include <openssl/x509.h>
+
 using namespace std;
 
 class AbstractError
@@ -15,7 +18,7 @@ class AbstractError
 class NumericError : public AbstractError
 {
 public:
-	string SearchErrorMsg(string Error, int ClassCode);
+	string SearchErrorMsg(int Error, int ClassCode);
 };
 
 class ErrnoError : public NumericError
