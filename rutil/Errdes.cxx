@@ -11,7 +11,7 @@ map <string, string> WinErrorMsg;
 map <string, string> ErrornoErrorMsg;
 map <string, string> OpenSSLErrorMsg;
 
-string NumericError::SearchErrorMsg(int Error, int ClassCode)
+string NumericError::SearchErrorMsg(string Error, int ClassCode)
 {
 	string result;
 	switch(ClassCode)
@@ -41,7 +41,7 @@ void ErrnoError::CreateMappingErrorMsg()
 {
 	string ErrorCode[134] = 
 	{
-	  	  "No error","EPERM","ENOENT","ESRCH","EINTR","EIO","ENXIO","E2BIG","ENOEXEC","EBADF","ECHILD","EAGAIN","ENOMEM","EACCES","EFAULT",
+	"No error","EPERM","ENOENT","ESRCH","EINTR","EIO","ENXIO","E2BIG","ENOEXEC","EBADF","ECHILD","EAGAIN","ENOMEM","EACCES","EFAULT",
       	"ENOTBLK","EBUSY","EEXIST","EXDEV","ENODEV","ENOTDIR","EISDIR","EINVAL","ENFILE","EMFILE","ENOTTY","ETXTBSY","EFBIG",
       	"ENOSPC","ESPIPE","EROFS","EMLINK","EPIPE","EDOM","ERANGE","EDEADLK","ENAMETOOLONG","ENOLCK","ENOSYS","ENOTEMPTY","ELOOP",
       	"EWOULDBLOCK","ENOMSG","EIDRM","ECHRNG","EL2NSYNC","EL3HLT","EL3RST","ELNRNG","EUNATCH","ENOCSI","EL2HLT","EBADE","EBADR",
@@ -57,8 +57,8 @@ void ErrnoError::CreateMappingErrorMsg()
 
 	string ErrorString[134] = 
 	{
-	  	  "No error 0",
-	  	  "EPERM (Operation not permitted) 1",
+	  "No error 0",
+	  "EPERM (Operation not permitted) 1",
       	"ENOENT (No such file or directory) 2",
       	"ESRCH (No such process) 3",
       	"EINTR (Interrupted system call) 4",
