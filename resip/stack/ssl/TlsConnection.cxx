@@ -10,6 +10,7 @@
 #include "rutil/Logger.hxx"
 #include "resip/stack/Uri.hxx"
 #include "rutil/Socket.hxx"
+#include "rutil/Errdes.hxx"
 
 #include <openssl/e_os2.h>
 #include <openssl/evp.h>
@@ -19,6 +20,11 @@
 #include <openssl/pkcs7.h>
 #include <openssl/x509v3.h>
 #include <openssl/ssl.h>
+#endif
+
+#ifdef _WIN32
+   #include <winsock.h>
+   #include <windows.h>
 #endif
 
 using namespace resip;
@@ -183,6 +189,22 @@ TlsConnection::fromState(TlsConnection::TlsState s)
 TlsConnection::TlsState
 TlsConnection::checkState()
 {
+
+   NumericError search;
+   #ifdef _WIN32
+      ErrnoError WinObj;
+   #endif
+   ErrnoError ErrornoObj;
+   X509Error X509Obj;
+   OpenSSLError OpenSSLObj;
+
+   #ifdef _WIN32
+      WinObj.CreateMappingErrorMsg();
+   #endif
+   ErrornoObj.CreateMappingErrorMsg();
+   X509Obj.CreateMappingErrorMsg();
+   OpenSSLObj.CreateMappingErrorMsg();
+
 #if defined(USE_SSL)
    //DebugLog(<<"state is " << fromTlsState(mTlsState));
 
@@ -224,7 +246,7 @@ TlsConnection::checkState()
       switch (err)
       {
          case SSL_ERROR_WANT_READ:
-            StackLog( << "TLS handshake want read" );
+            StackLog( << "TLS handshake want read" << search.SearchErrorMsg(err,2) );
             mHandShakeWantsRead = true;
             return mTlsState;
 
@@ -372,6 +394,22 @@ TlsConnection::checkState()
 int 
 TlsConnection::read(char* buf, int count )
 {
+
+   NumericError search;
+   #ifdef _WIN32
+      ErrnoError WinObj;
+   #endif
+   ErrnoError ErrornoObj;
+   X509Error X509Obj;
+   OpenSSLError OpenSSLObj;
+   
+   #ifdef _WIN32
+      WinObj.CreateMappingErrorMsg();
+   #endif
+   ErrornoObj.CreateMappingErrorMsg();
+   X509Obj.CreateMappingErrorMsg();
+   OpenSSLObj.CreateMappingErrorMsg();
+
 #if defined(USE_SSL)
    resip_assert( mSsl ); 
    resip_assert( buf );
@@ -447,7 +485,7 @@ TlsConnection::read(char* buf, int count )
          case SSL_ERROR_WANT_WRITE:
          case SSL_ERROR_NONE:
          {
-            StackLog( << "Got TLS read got condition of " << err  );
+            StackLog( << "Got TLS read got condition of " << search.SearchErrorMsg(err,2) );
             return 0;
          }
          break;
