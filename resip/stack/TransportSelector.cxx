@@ -716,22 +716,16 @@ TransportSelector::findTransportByVia(SipMessage* msg, const Tuple& target, Tupl
 Tuple
 TransportSelector::determineSourceInterface(SipMessage* msg, const Tuple& target) const
 {
-
    NumericError search;
    #ifdef _WIN32
       ErrnoError WinObj;
    #endif
    ErrnoError ErrornoObj;
-   X509Error X509Obj;
-   OpenSSLError OpenSSLObj;
    
    #ifdef _WIN32
       WinObj.CreateMappingErrorMsg();
    #endif
    ErrornoObj.CreateMappingErrorMsg();
-   X509Obj.CreateMappingErrorMsg();
-   OpenSSLObj.CreateMappingErrorMsg();
-
 
    resip_assert(msg->exists(h_Vias));
    resip_assert(!msg->header(h_Vias).empty());
@@ -802,7 +796,7 @@ TransportSelector::determineSourceInterface(SipMessage* msg, const Tuple& target
       {
          int e = getErrno();
          Transport::error( e );
-         InfoLog(<< "Unable to route to " << target << " : [" << e << "] " << search.SearchErrorMsg(e,1) );
+         InfoLog(<< "Unable to route to " << target << " : [" << e << "] " << search.SearchErrorMsg(e,OSERROR) );
          throw Transport::Exception("Can't find source address for Via", __FILE__,__LINE__);
       }
 
