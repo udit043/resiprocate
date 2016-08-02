@@ -13,6 +13,10 @@
 #include <windows.h>
 #endif
 
+#define OSERROR 1
+#define SSLERROR 2
+#define X509ERROR 3
+
 using namespace std;
 
 map <int, string> ErrornoErrorMsg;
@@ -28,7 +32,7 @@ string NumericError::SearchErrorMsg(int Error, int ClassCode)
     string result;
     switch(ClassCode)
     {
-        case 1:
+        case OSERROR:
         {
             #ifdef _WIN32
                 result = WinErrorMsg[Error];
@@ -37,10 +41,10 @@ string NumericError::SearchErrorMsg(int Error, int ClassCode)
             #endif
             break;
         }
-        case 2:
+        case SSLERROR:
         result = OpenSSLErrorMsg[Error];
         break;
-        case 3:
+        case X509ERROR:
         result = X509ErrorMsg[Error];
         break;
     }
