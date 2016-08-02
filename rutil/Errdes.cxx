@@ -37,7 +37,7 @@ string NumericError::SearchErrorMsg(int Error, int ClassCode)
 				result = ErrornoErrorMsg[Error];
 			#endif
 			break;
-        }
+        	}
 		case SSLERROR:
 		result = OpenSSLErrorMsg[Error];
 		break;
@@ -296,7 +296,7 @@ void ErrnoError::CreateMappingErrorMsg()
 void OpenSSLError::CreateMappingErrorMsg()
 {
   OpenSSLErrorMsg[SSL_ERROR_NONE]             = "SSL_ERROR_NONE 0";
-	OpenSSLErrorMsg[SSL_ERROR_SSL]              = "SSL_ERROR_SSL 1";
+  OpenSSLErrorMsg[SSL_ERROR_SSL]              = "SSL_ERROR_SSL 1";
   OpenSSLErrorMsg[SSL_ERROR_WANT_READ]        = "SSL_ERROR_WANT_READ 2";
   OpenSSLErrorMsg[SSL_ERROR_WANT_WRITE]       = "SSL_ERROR_WANT_WRITE 3";
   OpenSSLErrorMsg[SSL_ERROR_WANT_X509_LOOKUP] = "SSL_ERROR_WANT_X509_LOOKUP 4";
