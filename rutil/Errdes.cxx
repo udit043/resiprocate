@@ -286,9 +286,7 @@ void ErrnoError::CreateMappingErrorMsg()
   ErrornoErrorMsg[ERFKILL]         = "ERFKILL (Operation not possible due to RF-kill) 132";
   ErrornoErrorMsg[EHWPOISON]       = "EHWPOISON (Memory page has hardware error) 133";
 };
-
 #endif
-
 };
 
 void OpenSSLError::CreateMappingErrorMsg()
@@ -302,7 +300,6 @@ void OpenSSLError::CreateMappingErrorMsg()
   OpenSSLErrorMsg[SSL_ERROR_ZERO_RETURN]      = "SSL_ERROR_ZERO_RETURN 6";
   OpenSSLErrorMsg[SSL_ERROR_WANT_CONNECT]     = "SSL_ERROR_WANT_CONNECT 7";
   OpenSSLErrorMsg[SSL_ERROR_WANT_ACCEPT]      = "SSL_ERROR_WANT_ACCEPT 8";
-
 };
 
 void X509Error::CreateMappingErrorMsg()
@@ -361,7 +358,6 @@ void X509Error::CreateMappingErrorMsg()
     X509ErrorMsg[X509_V_ERR_UNSUPPORTED_CONSTRAINT_SYNTAX]      = "X509_V_ERR_UNSUPPORTED_CONSTRAINT_SYNTAX 52";
     X509ErrorMsg[X509_V_ERR_UNSUPPORTED_NAME_SYNTAX]            = "X509_V_ERR_UNSUPPORTED_NAME_SYNTAX 53";
     X509ErrorMsg[X509_V_ERR_CRL_PATH_VALIDATION_ERROR]          = "X509_V_ERR_CRL_PATH_VALIDATION_ERROR 54";
-
 };
 
 NumericError search;
