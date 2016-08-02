@@ -23,8 +23,8 @@
 #endif
 
 #ifdef _WIN32
-   #include <winsock.h>
-   #include <windows.h>
+#include <winsock.h>
+#include <windows.h>
 #endif
 
 using namespace resip;
@@ -191,18 +191,8 @@ TlsConnection::checkState()
 {
 
    NumericError search;
-   #ifdef _WIN32
-      ErrnoError WinObj;
-   #endif
-   ErrnoError ErrornoObj;
-   X509Error X509Obj;
    OpenSSLError OpenSSLObj;
 
-   #ifdef _WIN32
-      WinObj.CreateMappingErrorMsg();
-   #endif
-   ErrornoObj.CreateMappingErrorMsg();
-   X509Obj.CreateMappingErrorMsg();
    OpenSSLObj.CreateMappingErrorMsg();
 
 #if defined(USE_SSL)
@@ -246,7 +236,7 @@ TlsConnection::checkState()
       switch (err)
       {
          case SSL_ERROR_WANT_READ:
-            StackLog( << "TLS handshake want read" << search.SearchErrorMsg(err,2) );
+            StackLog( << "TLS handshake want read" << search.SearchErrorMsg(err,SSLERROR) );
             mHandShakeWantsRead = true;
             return mTlsState;
 
@@ -396,18 +386,8 @@ TlsConnection::read(char* buf, int count )
 {
 
    NumericError search;
-   #ifdef _WIN32
-      ErrnoError WinObj;
-   #endif
-   ErrnoError ErrornoObj;
-   X509Error X509Obj;
    OpenSSLError OpenSSLObj;
-   
-   #ifdef _WIN32
-      WinObj.CreateMappingErrorMsg();
-   #endif
-   ErrornoObj.CreateMappingErrorMsg();
-   X509Obj.CreateMappingErrorMsg();
+
    OpenSSLObj.CreateMappingErrorMsg();
 
 #if defined(USE_SSL)
@@ -485,7 +465,7 @@ TlsConnection::read(char* buf, int count )
          case SSL_ERROR_WANT_WRITE:
          case SSL_ERROR_NONE:
          {
-            StackLog( << "Got TLS read got condition of " << search.SearchErrorMsg(err,2) );
+            StackLog( << "Got TLS read got condition of " << search.SearchErrorMsg(err,SSLERROR) );
             return 0;
          }
          break;
