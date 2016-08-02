@@ -7,7 +7,6 @@
 #include <openssl/ssl.h>
 #include <openssl/x509.h>
 
-
 #ifdef _WIN32
 #include <winsock.h>
 #include <windows.h>
@@ -22,7 +21,6 @@ map <int, string> ErrornoErrorMsg;
 #endif
 map <int, string> OpenSSLErrorMsg;
 map <int, string> X509ErrorMsg;
-
 
 string NumericError::SearchErrorMsg(int Error, int ClassCode)
 {
