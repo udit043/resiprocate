@@ -14,6 +14,10 @@
 #include <windows.h>
 #endif
 
+#define OSERROR 1
+#define SSLERROR 2
+#define X509ERROR 3
+
 using namespace std;
 
 class AbstractError
