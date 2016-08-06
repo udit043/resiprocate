@@ -120,8 +120,45 @@ verifyCallback(int iInCode, X509_STORE_CTX *pInStore)
    }
  
    return iInCode;
+} 
 }
- 
+
+bool IsDomainInDefCert(const char *servername)
+{
+   if (strcasecmp(servername, "ws.sip5060.net") == 0)
+   {
+      return true;
+   }
+   else
+   {
+      return false;
+   }
+}
+
+static int
+ssl_servername_cb(SSL *ssl, int *ad, void *arg)
+{
+    resip_assert(ssl);
+    if (ssl == NULL)
+        return SSL_TLSEXT_ERR_NOACK;
+
+    const char* servername = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+    resip_assert(servername && servername[0]);
+    if (!servername || servername[0] == '\0')
+        return SSL_TLSEXT_ERR_NOACK;
+
+    /* Does the default cert already handle this domain? */
+    if (!IsDomainInDefCert(servername))
+        return SSL_TLSEXT_ERR_NOACK;
+
+    /* Need a new certificate for this domain */
+/*    SSL_CTX* ctx = GetServerContext(servername);
+    resip_assert(ctx != NULL);
+    if (ctx == NULL)
+        return SSL_TLSEXT_ERR_NOACK;   
+*/
+
+    return SSL_TLSEXT_ERR_OK;
 }
 
 // .amr. RFC 5922 mandates exact match only on certificates, so this is the default, but RFC 2459 and RFC 3261 don't prevent wildcards, so enable if you want that mode.
@@ -1153,6 +1190,7 @@ BaseSecurity::BaseSecurity (const CipherList& cipherSuite, const Data& defaultPr
    SSL_CTX_set_default_passwd_cb(mTlsCtx, pem_passwd_cb);
    SSL_CTX_set_cert_store(mTlsCtx, mRootTlsCerts);
    SSL_CTX_set_verify(mTlsCtx, SSL_VERIFY_PEER|SSL_VERIFY_CLIENT_ONCE, verifyCallback);
+   SSL_CTX_set_tlsext_servername_callback(mTlsCtx,ssl_servername_cb);
    ret = SSL_CTX_set_cipher_list(mTlsCtx, cipherSuite.cipherList().c_str());
    resip_assert(ret);
    setDHParams(mTlsCtx);
@@ -1164,6 +1202,7 @@ BaseSecurity::BaseSecurity (const CipherList& cipherSuite, const Data& defaultPr
    SSL_CTX_set_default_passwd_cb(mSslCtx, pem_passwd_cb);
    SSL_CTX_set_cert_store(mSslCtx, mRootSslCerts);
    SSL_CTX_set_verify(mSslCtx, SSL_VERIFY_PEER|SSL_VERIFY_CLIENT_ONCE, verifyCallback);
+   SSL_CTX_set_tlsext_servername_callback(mSslCtx,ssl_servername_cb);   
    ret = SSL_CTX_set_cipher_list(mSslCtx,cipherSuite.cipherList().c_str());
    resip_assert(ret);
    setDHParams(mSslCtx);
