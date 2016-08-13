@@ -40,8 +40,13 @@ CREATE UNIQUE INDEX idx_user_domain ON users (username, domain);
 --
 
 CREATE TABLE IF NOT EXISTS routesavp (
-  attr VARCHAR(255) PRIMARY KEY,
-  value VARCHAR(4096)
+  method VARCHAR(255) NOT NULL,
+  event VARCHAR(255),
+  matchingpattern VARCHAR(255),
+  rewriteexpression VARCHAR(255),
+  order VARCHAR(255),
+  value VARCHAR(4096),
+  PRIMARY KEY (method, event, matchingpattern, order)
 );
 
 --
@@ -49,8 +54,14 @@ CREATE TABLE IF NOT EXISTS routesavp (
 --
 
 CREATE TABLE IF NOT EXISTS aclsavp (
-  attr VARCHAR(255) PRIMARY KEY,
-  value VARCHAR(4096)
+  tlspeername VARCHAR(255) NOT NULL,
+  address VARCHAR(255),
+  mask VARCHAR(255),
+  port VARCHAR(255),
+  family VARCHAR(255),
+  transport VARCHAR(255),
+  value VARCHAR(4096),
+  PRIMARY KEY (tlspeername, address, mask, port, family, transport)
 );
 
 --
@@ -58,8 +69,10 @@ CREATE TABLE IF NOT EXISTS aclsavp (
 --
 
 CREATE TABLE IF NOT EXISTS configsavp (
-  attr VARCHAR(255) PRIMARY KEY,
-  value VARCHAR(4096)
+  domain VARCHAR(255) NOT NULL,
+  tlsport VARCHAR(255),
+  value VARCHAR(4096),
+  PRIMARY KEY (domain, tlsport)
 );
 
 --
@@ -67,8 +80,11 @@ CREATE TABLE IF NOT EXISTS configsavp (
 --
 
 CREATE TABLE IF NOT EXISTS staticregsavp (
-  attr VARCHAR(255) PRIMARY KEY,
-  value VARCHAR(4096)
+  aor VARCHAR(255) NOT NULL,
+  contact VARCHAR(255),
+  mpath VARCHAR(255), 
+  value VARCHAR(4096),
+  PRIMARY KEY (aor, contact, mpath)
 );
 
 --
@@ -76,20 +92,29 @@ CREATE TABLE IF NOT EXISTS staticregsavp (
 --
 
 CREATE TABLE IF NOT EXISTS filtersavp (
-  attr VARCHAR(255) PRIMARY KEY,
-  value VARCHAR(4096)
+  cond1header VARCHAR(255) NOT NULL,
+  cond1regex VARCHAR(255),
+  cond2header VARCHAR(255),
+  cond2regex VARCHAR(255),
+  method VARCHAR(255),
+  event VARCHAR(255),
+  value VARCHAR(4096),
+  PRIMARY KEY (cond1header, cond1regex, cond2header, cond2regex, method, event)
 );
 
 --
 -- Table structure for table siloavp
--- Note:  This table contains 2 indexes
 --
 
 CREATE TABLE IF NOT EXISTS siloavp (
-  attr VARCHAR(255) NOT NULL,
-  attr2 VARCHAR(255) NOT NULL,
+  desturi VARCHAR(255) NOT NULL,
+  sourceuri VARCHAR(255) NOT NULL,
+  sendtime VARCHAR(24),
+  tid VARCHAR(255),
+  mimetype VARCHAR(255),
+  msgbody VARCHAR(255),
   value VARCHAR(20315),
-  PRIMARY KEY (attr, attr2)
+  PRIMARY KEY (desturi, sourceuri, sendtime, tid, mimetype, msgbody)
 );
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON users, routesavp,
