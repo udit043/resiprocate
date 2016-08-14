@@ -45,8 +45,7 @@ CREATE TABLE IF NOT EXISTS routesavp (
   matchingpattern VARCHAR(255),
   rewriteexpression VARCHAR(255),
   order VARCHAR(255),
-  value VARCHAR(4096),
-  PRIMARY KEY (method, event, matchingpattern, order)
+  PRIMARY KEY (method, event)
 );
 
 --
@@ -60,8 +59,7 @@ CREATE TABLE IF NOT EXISTS aclsavp (
   port VARCHAR(255),
   family VARCHAR(255),
   transport VARCHAR(255),
-  value VARCHAR(4096),
-  PRIMARY KEY (tlspeername, address, mask, port, family, transport)
+  PRIMARY KEY (tlspeername, address)
 );
 
 --
@@ -71,8 +69,7 @@ CREATE TABLE IF NOT EXISTS aclsavp (
 CREATE TABLE IF NOT EXISTS configsavp (
   domain VARCHAR(255) NOT NULL,
   tlsport VARCHAR(255),
-  value VARCHAR(4096),
-  PRIMARY KEY (domain, tlsport)
+  PRIMARY KEY (domain)
 );
 
 --
@@ -83,8 +80,7 @@ CREATE TABLE IF NOT EXISTS staticregsavp (
   aor VARCHAR(255) NOT NULL,
   contact VARCHAR(255),
   mpath VARCHAR(255), 
-  value VARCHAR(4096),
-  PRIMARY KEY (aor, contact, mpath)
+  PRIMARY KEY (aor, contact)
 );
 
 --
@@ -98,23 +94,22 @@ CREATE TABLE IF NOT EXISTS filtersavp (
   cond2regex VARCHAR(255),
   method VARCHAR(255),
   event VARCHAR(255),
-  value VARCHAR(4096),
-  PRIMARY KEY (cond1header, cond1regex, cond2header, cond2regex, method, event)
+  PRIMARY KEY (cond1header, cond1regex)
 );
 
 --
 -- Table structure for table siloavp
+-- Note:  This table contains 2 indexes
 --
 
 CREATE TABLE IF NOT EXISTS siloavp (
   desturi VARCHAR(255) NOT NULL,
   sourceuri VARCHAR(255) NOT NULL,
-  sendtime VARCHAR(24),
+  senttime VARCHAR(24),
   tid VARCHAR(255),
   mimetype VARCHAR(255),
   msgbody VARCHAR(255),
-  value VARCHAR(20315),
-  PRIMARY KEY (desturi, sourceuri, sendtime, tid, mimetype, msgbody)
+  PRIMARY KEY (desturi, sourceuri, sendtime)
 );
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON users, routesavp,
