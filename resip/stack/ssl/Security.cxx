@@ -237,8 +237,13 @@ Security::preload()
    // or a collection of root certificates
 
    NumericError search;
-   ErrnoError ErrornoObj;    // Error message only for UNIX platforms
-   ErrornoObj.CreateMappingErrorMsg();
+   #ifdef _WIN32
+      ErrnoError WinObj;
+      WinObj.CreateMappingErrorMsg();
+   #elif __linux__
+      ErrnoError ErrornoObj;
+      ErrornoObj.CreateMappingErrorMsg();
+   #endif
 
    struct stat s;
    Data fileName(mPath);
