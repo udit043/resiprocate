@@ -5,7 +5,6 @@
 #include "rutil/FdSetIOObserver.hxx"
 #include "rutil/Logger.hxx"
 #include "rutil/BaseException.hxx"
-#include "rutil/Errdes.hxx"
 
 #include <vector>
 
@@ -339,19 +338,10 @@ FdPollImplFdSet::waitAndProcess(int ms)
    int numReady = fdset.selectMilliSeconds(ms);
    if ( numReady < 0 )
    {
-      NumericError search;
-      #ifdef _WIN32
-        ErrnoError WinObj;
-        WinObj.CreateMappingErrorMsg();
-      #elif __linux__
-        ErrnoError ErrornoObj;
-        ErrornoObj.CreateMappingErrorMsg();
-      #endif  
-      
       int err = getErrno();
       if ( err!=EINTR )
       {
-         CritLog(<<"select() failed: "<< search.SearchErrorMsg(err,OSERROR) );
+         CritLog(<<"select() failed: "<<strerror(err));
          resip_assert(0);     // .kw. not sure correct behavior...
       }
       return false;
@@ -675,15 +665,6 @@ FdPollImplPoll::unregisterFdSetIOObserver(FdSetIOObserver& observer)
 bool
 FdPollImplPoll::waitAndProcess(int ms)
 {
-   NumericError search;
-   #ifdef _WIN32
-     ErrnoError WinObj;
-     WinObj.CreateMappingErrorMsg();
-   #elif __linux__
-     ErrnoError ErrornoObj;
-     ErrornoObj.CreateMappingErrorMsg();
-   #endif
-
    int waitMs = ms;
 
    // Copy vector - cheaper than rebuilding from scratch each time
@@ -761,7 +742,7 @@ FdPollImplPoll::waitAndProcess(int ms)
       int err = getErrno();
       if ( err != EINTR )
       {
-         CritLog(<<"poll() failed: " << err << " " << search.SearchErrorMsg(err,OSERROR) );
+         CritLog(<<"poll() failed: " << err << " " << strerror(err));
          resip_assert(0);     // .kw. not sure correct behavior...
       }
       return false;
@@ -815,7 +796,7 @@ FdPollImplPoll::waitAndProcess(int ms)
          int err = getErrno();
          if (err != EINTR)
          {
-            CritLog(<<"select() failed: "<< search.SearchErrorMsg(err,OSERROR) );
+            CritLog(<<"select() failed: "<<strerror(err));
             resip_assert(0);     // .kw. not sure correct behavior...
          }
       }
@@ -1126,19 +1107,10 @@ FdPollImplEpoll::waitAndProcess(int ms)
       // do the epoll_wait below? I want to say no...
       if ( numReady < 0 )
       {
-         NumericError search;
-         #ifdef _WIN32
-            ErrnoError WinObj;
-            WinObj.CreateMappingErrorMsg();
-         #elif __linux__
-            ErrnoError ErrornoObj;
-            ErrornoObj.CreateMappingErrorMsg();
-         #endif
-
          int err = getErrno();
          if ( err!=EINTR )
          {
-            CritLog(<<"select() failed: "<< search.SearchErrorMsg(err,OSERROR) );
+            CritLog(<<"select() failed: "<<strerror(err));
             resip_assert(0);     // .kw. not sure correct behavior...
          }
          return false;
@@ -1202,25 +1174,16 @@ FdPollImplEpoll::epollWait(int waitMs)
       int nfds = epoll_wait(mEPollFd, &mEvCache.front(), mEvCache.size(), waitMs);
       if (nfds < 0)
       {
-         NumericError search;
-         #ifdef _WIN32
-            ErrnoError WinObj;
-            WinObj.CreateMappingErrorMsg();
-         #elif __linux__
-            ErrnoError ErrornoObj;
-            ErrornoObj.CreateMappingErrorMsg();
-         #endif
-         
          if (errno==EINTR)
          {
             // signal handler (like alarm) broke loop. generally ok
-            DebugLog(<<"epoll_wait() broken by EINTR: " << search.SearchErrorMsg(errno,OSERROR) );
+            DebugLog(<<"epoll_wait() broken by EINTR");
             nfds = 0;   // clean-up and return. could add return code
             // to indicate this, but not needed by us
          }
          else
          {
-            CritLog(<<"epoll_wait() failed: " << search.SearchErrorMsg(errno,OSERROR) );
+            CritLog(<<"epoll_wait() failed: " << strerror(errno));
             abort();   // TBD: just throw instead?
          }
       }
