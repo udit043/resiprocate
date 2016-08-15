@@ -19,6 +19,7 @@
 #include "rutil/Data.hxx"
 #include "rutil/Logger.hxx"
 #include "rutil/ParseBuffer.hxx"
+#include "rutil/Errdes.hxx"
 
 #include "Resolver.hxx"
 
@@ -228,10 +229,19 @@ Resolver::isIpAddress(const Data& data)
 Data
 Resolver::getHostName()
 {
+   NumericError search;
+   #ifdef _WIN32
+      ErrnoError WinObj;
+      WinObj.CreateMappingErrorMsg();
+   #elif __linux__
+      ErrnoError ErrornoObj;
+      ErrornoObj.CreateMappingErrorMsg();
+   #endif
+
    char buffer[255];
    if (gethostname(buffer, sizeof(buffer)) < 0)
    {
-      InfoLog (<< "Failed gethostname() " << strerror(errno));
+      InfoLog (<< "Failed gethostname() : " << search.SearchErrorMsg(errno,OSERROR) );
       return "localhost";
    }
    else
