@@ -8,7 +8,6 @@
 #include "resip/stack/Tuple.hxx"
 #include "rutil/DnsUtil.hxx"
 #include "rutil/ParseBuffer.hxx"
-#include "rutil/Errdes.hxx"
 
 #include "repro/ReproVersion.hxx"
 #include "repro/HttpBase.hxx"
@@ -221,15 +220,6 @@ HttpConnection::processSomeReads()
 
    if (bytesRead == INVALID_SOCKET)
    {
-      NumericError search;
-      #ifdef _WIN32
-         ErrnoError WinObj;
-         WinObj.CreateMappingErrorMsg();
-      #elif __linux__
-         ErrnoError ErrornoObj;
-         ErrornoObj.CreateMappingErrorMsg();
-      #endif
-
       int e = getErrno();
       switch (e)
       {
@@ -237,28 +227,28 @@ HttpConnection::processSomeReads()
 #if EAGAIN != EWOULDBLOCK
          case EWOULDBLOCK:  // Treat EGAIN and EWOULDBLOCK as the same: http://stackoverflow.com/questions/7003234/which-systems-define-eagain-and-ewouldblock-as-different-values
 #endif
-            InfoLog (<< "No data ready to read" << search.SearchErrorMsg(e,OSERROR) );
+            InfoLog (<< "No data ready to read");
             return true;
          case EINTR:
-            InfoLog (<< "The call was interrupted by a signal before any data was read." << search.SearchErrorMsg(e,OSERROR) );
+            InfoLog (<< "The call was interrupted by a signal before any data was read.");
             break;
          case EIO:
             InfoLog (<< "I/O error");
             break;
          case EBADF:
-            InfoLog (<< "fd is not a valid file descriptor or is not open for reading." << search.SearchErrorMsg(e,OSERROR) );
+            InfoLog (<< "fd is not a valid file descriptor or is not open for reading.");
             break;
          case EINVAL:
-            InfoLog (<< "fd is attached to an object which is unsuitable for reading." << search.SearchErrorMsg(e,OSERROR) );
+            InfoLog (<< "fd is attached to an object which is unsuitable for reading.");
             break;
          case EFAULT:
-            InfoLog (<< "buf is outside your accessible address space." << search.SearchErrorMsg(e,OSERROR) );
+            InfoLog (<< "buf is outside your accessible address space.");
             break;
          default:
-            InfoLog (<< "Some other error" << search.SearchErrorMsg(e,OSERROR) );
+            InfoLog (<< "Some other error");
             break;
       }
-      InfoLog (<< "Failed read on " << (int)mSock << " " << search.SearchErrorMsg(e,OSERROR) );
+      InfoLog (<< "Failed read on " << (int)mSock << " " << strerror(e));
       return false;
    }
    else if (bytesRead == 0)
@@ -375,17 +365,8 @@ HttpConnection::processSomeWrites()
 
    if (bytesWritten == INVALID_SOCKET)
    {
-      NumericError search;
-      #ifdef _WIN32
-         ErrnoError WinObj;
-         WinObj.CreateMappingErrorMsg();
-      #elif __linux__
-         ErrnoError ErrornoObj;
-         ErrornoObj.CreateMappingErrorMsg();
-      #endif
-
       int e = getErrno();
-      InfoLog (<< "HttpConnection failed write on " << mSock << " " << search.SearchErrorMsg(e,OSERROR) );
+      InfoLog (<< "HttpConnection failed write on " << mSock << " " << strerror(e));
 
       return false;
    }

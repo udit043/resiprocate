@@ -4,7 +4,6 @@
 
 #include "rutil/ResipAssert.h"
 
-#include "rutil/Errdes.hxx"
 #include "rutil/Data.hxx"
 #include "rutil/Socket.hxx"
 #include "resip/stack/Symbols.hxx"
@@ -51,15 +50,6 @@ HttpBase::HttpBase( int port, IpVersion ipVer, const Data& realm, const resip::D
    nextConnection(0),
    mTuple(ipAddr,port,ipVer,TCP,Data::Empty)
 {
-   NumericError search;
-   #ifdef _WIN32
-      ErrnoError WinObj;
-      WinObj.CreateMappingErrorMsg();
-   #elif __linux__
-      ErrnoError ErrornoObj;
-      ErrornoObj.CreateMappingErrorMsg();
-   #endif 
-   
    // !rwm! [TODO] check that this works for IPv6   
    //assert( ipVer == V4 );
 
@@ -79,7 +69,7 @@ HttpBase::HttpBase( int port, IpVersion ipVer, const Data& realm, const resip::D
    if ( mFd == INVALID_SOCKET )
    {
       int e = getErrno();
-      ErrLog (<< "Failed to create socket: " << search.SearchErrorMsg(e,OSERROR) );
+      ErrLog (<< "Failed to create socket: " << strerror(e));
       sane = false;
       return;
    }
@@ -95,7 +85,7 @@ HttpBase::HttpBase( int port, IpVersion ipVer, const Data& realm, const resip::D
 #endif
    {
       int e = getErrno();
-      ErrLog (<< "Couldn't set sockoptions SO_REUSEPORT | SO_REUSEADDR: " << search.SearchErrorMsg(e,OSERROR) );
+      ErrLog (<< "Couldn't set sockoptions SO_REUSEPORT | SO_REUSEADDR: " << strerror(e));
       sane = false;
       return;
    }
@@ -107,7 +97,7 @@ HttpBase::HttpBase( int port, IpVersion ipVer, const Data& realm, const resip::D
       if ( ::setsockopt(mFd, IPPROTO_IPV6, IPV6_V6ONLY, &on, sizeof(on)) )
       {
           int e = getErrno();
-          ErrLog(<< "HttpBase::HttpBase: Couldn't set sockoptions IPV6_V6ONLY: " << search.SearchErrorMsg(e,OSERROR) );
+          ErrLog(<< "HttpBase::HttpBase: Couldn't set sockoptions IPV6_V6ONLY: " << strerror(e));
           sane = false;
           return;
       }
@@ -122,12 +112,11 @@ HttpBase::HttpBase( int port, IpVersion ipVer, const Data& realm, const resip::D
       int e = getErrno();
       if ( e == EADDRINUSE )
       {
-         ErrLog (<< mTuple << " already in use : " << search.SearchErrorMsg(e,OSERROR) );
+         ErrLog (<< mTuple << " already in use ");
       }
       else
       {
          ErrLog (<< "Could not bind to " << mTuple);
-         DebugLog (<< "Got error condition : " << search.SearchErrorMsg(e,OSERROR) );
       }
       sane = false;
       return;
@@ -149,7 +138,7 @@ HttpBase::HttpBase( int port, IpVersion ipVer, const Data& realm, const resip::D
    if (e != 0 )
    {
       int e = getErrno();
-      InfoLog (<< "Failed listen " << search.SearchErrorMsg(e,OSERROR) );
+      InfoLog (<< "Failed listen " << strerror(e));
       sane = false;
       return;
    }
@@ -182,15 +171,6 @@ HttpBase::process(FdSet& fdset)
       Socket sock = accept( mFd, &peer, &peerLen);
       if ( sock == SOCKET_ERROR )
       {
-         NumericError search;
-         #ifdef _WIN32
-            ErrnoError WinObj;
-            WinObj.CreateMappingErrorMsg();
-         #elif __linux__
-            ErrnoError ErrornoObj;
-            ErrornoObj.CreateMappingErrorMsg();
-         #endif 
-         
          int e = getErrno();
          switch (e)
          {
@@ -201,7 +181,7 @@ HttpBase::process(FdSet& fdset)
                // !jf! this can not be ready in some cases 
                return;
             default:
-               ErrLog(<< "Some error reading from socket: " << search.SearchErrorMsg(e,OSERROR) );
+               ErrLog(<< "Some error reading from socket: " << e);
                // .bwc. This is almost certainly a bad assert that a nefarious
                // endpoint could hit.
                // assert(0); // Transport::error(e);
