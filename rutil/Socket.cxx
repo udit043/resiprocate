@@ -6,7 +6,6 @@
 #include "rutil/compat.hxx"
 #include "rutil/Socket.hxx"
 #include "rutil/Logger.hxx"
-#include "rutil/Errdes.hxx"
 
 #ifndef WIN32
 #include <unistd.h>
@@ -70,17 +69,8 @@ resip::configureConnectedSocket(Socket fd)
    int on = 1;
    if ( ::setsockopt ( fd, SOL_SOCKET, SO_NOSIGPIPE, (const char*)&on, sizeof(on)) )
    {
-      NumericError search;
-      #ifdef _WIN32
-        ErrnoError WinObj;
-        WinObj.CreateMappingErrorMsg();
-      #elif __linux__
-        ErrnoError ErrornoObj;
-        ErrornoObj.CreateMappingErrorMsg();
-      #endif 
-
       int e = getErrno();
-      ErrLog (<< "Couldn't set sockoption SO_NOSIGPIPE: " << search.SearchErrorMsg(e,OSERROR) );
+      ErrLog (<< "Couldn't set sockoption SO_NOSIGPIPE: " << strerror(e));
       return false;
    }
 #endif
@@ -143,19 +133,11 @@ resip::closeSocket( Socket fd )
 int
 resip::closeSocket( Socket fd )
 {
-   NumericError search;
-   #ifdef _WIN32
-     ErrnoError WinObj;
-     WinObj.CreateMappingErrorMsg();
-   #elif __linux__
-     ErrnoError ErrornoObj;
-     ErrornoObj.CreateMappingErrorMsg();
-   #endif 
    //int ret = ::shutdown(fd, SHUT_RDWR); !jf!
    int ret = ::close(fd);
    if (ret < 0)
    {
-      InfoLog (<< "Failed to shutdown socket " << fd << " : " << search.SearchErrorMsg(errno,OSERROR) );
+      InfoLog (<< "Failed to shutdown socket " << fd << " : " << strerror(errno));
    }
    return ret;
 }
@@ -178,15 +160,6 @@ int resip::getSocketError(Socket fd)
 int
 resip::increaseLimitFds(unsigned int targetFds)
 {
-  NumericError search;
-  #ifdef _WIN32
-    ErrnoError WinObj;
-    WinObj.CreateMappingErrorMsg();
-  #elif __linux__
-    ErrnoError ErrornoObj;
-    ErrornoObj.CreateMappingErrorMsg();
-  #endif 
-
 #if defined(WIN32)
     // kw: i don't know if any equiv on windows
     return targetFds;
@@ -195,7 +168,7 @@ resip::increaseLimitFds(unsigned int targetFds)
 
     if (getrlimit(RLIMIT_NOFILE, &lim) < 0)
 	{
-	   CritLog(<<"getrlimit(NOFILE) failed: " << search.SearchErrorMsg(errno,OSERROR) );
+	   CritLog(<<"getrlimit(NOFILE) failed: " << strerror(errno));
 	   return -1;
     }
     if (lim.rlim_cur==RLIM_INFINITY || targetFds < lim.rlim_cur)
@@ -221,7 +194,7 @@ resip::increaseLimitFds(unsigned int targetFds)
     if (setrlimit(RLIMIT_NOFILE, &lim) < 0)
 	{
 	   CritLog(<<"setrlimit(NOFILE)=(c="<<lim.rlim_cur<<",m="<<lim.rlim_max
-	      <<",uid="<<euid<<") failed: " << search.SearchErrorMsg(errno,OSERROR) );
+	      <<",uid="<<euid<<") failed: " << strerror(errno));
 	   /* There is intermediate: could raise cur to max */
 	   return -1;
     }

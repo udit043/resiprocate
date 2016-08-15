@@ -26,7 +26,6 @@
 #include "rutil/Inserter.hxx"
 #include "rutil/WinCompat.hxx"
 #include "rutil/WinLeakCheck.hxx"
-#include "rutil/Errdes.hxx"
 
 #define RESIPROCATE_SUBSYSTEM resip::Subsystem::DNS
 
@@ -137,15 +136,6 @@ DnsUtil::getLocalHostName()
       buffer[0] = buffer[MAXHOSTNAMELEN] = '\0';
       if (gethostname(buffer,sizeof(buffer)-1) == -1)
       {
-         NumericError search;
-         #ifdef _WIN32
-            ErrnoError WinObj;
-            WinObj.CreateMappingErrorMsg();
-         #elif __linux__
-            ErrnoError ErrornoObj;
-            ErrornoObj.CreateMappingErrorMsg();
-         #endif 
-         
          int err = getErrno();
          switch (err)
          {
@@ -153,10 +143,10 @@ DnsUtil::getLocalHostName()
 //       current hack (see the #define in .hxx) needs
 //       to be reworked.
             case WSANOTINITIALISED:
-               CritLog( << "could not find local hostname because network not initialized:" << search.SearchErrorMsg(err,OSERROR) );
+               CritLog( << "could not find local hostname because network not initialized:" << strerror(err) );
                break;
             default:
-               CritLog( << "could not find local hostname:" << search.SearchErrorMsg(err,OSERROR) );
+               CritLog( << "could not find local hostname:" << strerror(err) );
                break;
          }
          throw Exception("could not find local hostname",__FILE__,__LINE__);
@@ -215,17 +205,8 @@ DnsUtil::getLocalDomainName()
       {
          if ( e != 0 )
          {
-            NumericError search;
-            #ifdef _WIN32
-               ErrnoError WinObj;
-               WinObj.CreateMappingErrorMsg();
-            #elif __linux__
-               ErrnoError ErrornoObj;
-               ErrornoObj.CreateMappingErrorMsg();
-            #endif
-
             int err = getErrno();
-            CritLog(<< "Couldn't find domainname: " << search.SearchErrorMsg(err,OSERROR) );
+            CritLog(<< "Couldn't find domainname: " << strerror(err));
             throw Exception(strerror(err), __FILE__,__LINE__);
          }
       }
