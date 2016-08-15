@@ -4,7 +4,6 @@
 
 #include "rutil/Logger.hxx"
 #include "rutil/Socket.hxx"
-#include "rutil/Errdes.hxx"
 #include "resip/stack/TcpConnection.hxx"
 #include "resip/stack/Tuple.hxx"
 
@@ -22,14 +21,6 @@ TcpConnection::TcpConnection(Transport* transport,const Tuple& who, Socket fd,
 int 
 TcpConnection::read( char* buf, int count )
 {
-   NumericError search;
-   #ifdef _WIN32
-      ErrnoError WinObj;
-      WinObj.CreateMappingErrorMsg();
-   #elif __linux__
-      ErrnoError ErrornoObj;
-      ErrornoObj.CreateMappingErrorMsg();
-   #endif
    resip_assert(buf);
    resip_assert(count > 0);
    
@@ -48,30 +39,30 @@ TcpConnection::read( char* buf, int count )
 #if EAGAIN != EWOULDBLOCK
          case EWOULDBLOCK:  // Treat EGAIN and EWOULDBLOCK as the same: http://stackoverflow.com/questions/7003234/which-systems-define-eagain-and-ewouldblock-as-different-values
 #endif
-            StackLog (<< "No data ready to read" << search.SearchErrorMsg(e,OSERROR) );
+            StackLog (<< "No data ready to read");
             return 0;
          case EINTR:
-            DebugLog (<< "The call was interrupted by a signal before any data was read." << search.SearchErrorMsg(e,OSERROR) );
+            DebugLog (<< "The call was interrupted by a signal before any data was read.");
             return 0;            
             break;
          case EIO:
-            InfoLog (<< "I/O error" << search.SearchErrorMsg(e,OSERROR) );
+            InfoLog (<< "I/O error");
             break;
          case EBADF:
-            InfoLog (<< "fd is not a valid file descriptor or is not open for reading." << search.SearchErrorMsg(e,OSERROR) );
+            InfoLog (<< "fd is not a valid file descriptor or is not open for reading.");
             break;
          case EINVAL:
-            InfoLog (<< "fd is attached to an object which is unsuitable for reading." << search.SearchErrorMsg(e,OSERROR) );
+            InfoLog (<< "fd is attached to an object which is unsuitable for reading.");
             break;
          case EFAULT:
-            ErrLog (<< "buf is outside your accessible address space." << search.SearchErrorMsg(e,OSERROR) );
+            ErrLog (<< "buf is outside your accessible address space.");
             break;
          default:
-            ErrLog (<< "Some other error, code = " << search.SearchErrorMsg(e,OSERROR) );
+            ErrLog (<< "Some other error, code = " << e);
             break;
       }
 
-      InfoLog (<< "Failed read on " << getSocket() << " " << search.SearchErrorMsg(e,OSERROR) );
+      InfoLog (<< "Failed read on " << getSocket() << " " << strerror(e));
       Transport::error(e);
       setFailureReason(TransportFailure::ConnectionException, e+2000);
       return -1;
@@ -89,14 +80,6 @@ TcpConnection::read( char* buf, int count )
 int 
 TcpConnection::write( const char* buf, const int count )
 {
-   NumericError search;
-   #ifdef _WIN32
-      ErrnoError WinObj;
-      WinObj.CreateMappingErrorMsg();
-   #elif __linux__
-      ErrnoError ErrornoObj;
-      ErrornoObj.CreateMappingErrorMsg();
-   #endif
    //DebugLog (<< "Writing " << buf);   // Note:  this can end up writing garbage to the logs following the message for non-null terminated buffers
 
    resip_assert(buf);
@@ -117,7 +100,7 @@ TcpConnection::write( const char* buf, const int count )
           // TCP buffers are backed up - we couldn't write anything - but we shouldn't treat this an error - return we wrote 0 bytes
           return 0;
       }
-      InfoLog (<< "Failed write on " << getSocket() << " " << search.SearchErrorMsg(e,OSERROR) );
+      InfoLog (<< "Failed write on " << getSocket() << " " << strerror(e));
       Transport::error(e);
       return -1;
    }
