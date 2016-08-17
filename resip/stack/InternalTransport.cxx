@@ -128,13 +128,13 @@ void
 InternalTransport::bind()
 {
    NumericError search;
-   #ifdef _WIN32
+#ifdef _WIN32
       ErrnoError WinObj;
       WinObj.CreateMappingErrorMsg();
-   #elif __linux__
+#elif __linux__
       ErrnoError ErrornoObj;
       ErrornoObj.CreateMappingErrorMsg();
-   #endif   
+#endif   
 
 #ifdef USE_NETNS
    DebugLog (<< "Binding to " << Tuple::inet_ntop(mTuple) 

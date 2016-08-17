@@ -29,11 +29,11 @@ string NumericError::SearchErrorMsg(int Error, int ClassCode)
     {
         case OSERROR:
         {
-            #ifdef _WIN32
+#ifdef _WIN32
                 result = WinErrorMsg[Error];
-            #elif __linux__
+#elif __linux__
                 result = ErrornoErrorMsg[Error];
-            #endif
+#endif
             break;
         }
         case SSLERROR:

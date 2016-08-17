@@ -162,13 +162,13 @@ resip::Socket
 MediaRelay::createRelaySocket(resip::Tuple& tuple)
 {
    NumericError search;
-   #ifdef _WIN32
+#ifdef _WIN32
       ErrnoError WinObj;
       WinObj.CreateMappingErrorMsg();
-   #elif __linux__
+#elif __linux__
       ErrnoError ErrornoObj;
       ErrornoObj.CreateMappingErrorMsg();
-   #endif
+#endif
 
    resip::Socket fd;
 
@@ -398,13 +398,13 @@ bool
 MediaRelay::processWrites(FdSet& fdset, MediaRelayPort* relayPort)
 {
    NumericError search;
-   #ifdef _WIN32
+#ifdef _WIN32
       ErrnoError WinObj;
       WinObj.CreateMappingErrorMsg();
-   #elif __linux__
+#elif __linux__
       ErrnoError ErrornoObj;
       ErrornoObj.CreateMappingErrorMsg();
-   #endif
+#endif
 
    resip::Socket fd = INVALID_SOCKET;
    Tuple tuple;
@@ -535,13 +535,13 @@ MediaRelay::processReads(FdSet& fdset, MediaRelayPort* relayPort)
       if ( len == SOCKET_ERROR )
       {
          NumericError search;
-         #ifdef _WIN32
+#ifdef _WIN32
             ErrnoError WinObj;
             WinObj.CreateMappingErrorMsg();
-         #elif __linux__
+#elif __linux__
             ErrnoError ErrornoObj;
             ErrornoObj.CreateMappingErrorMsg();
-         #endif
+#endif
          
          int err = getErrno();
          if ( err != EWOULDBLOCK  )

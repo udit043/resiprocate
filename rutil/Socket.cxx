@@ -71,13 +71,13 @@ resip::configureConnectedSocket(Socket fd)
    if ( ::setsockopt ( fd, SOL_SOCKET, SO_NOSIGPIPE, (const char*)&on, sizeof(on)) )
    {
       NumericError search;
-      #ifdef _WIN32
+#ifdef _WIN32
         ErrnoError WinObj;
         WinObj.CreateMappingErrorMsg();
-      #elif __linux__
+#elif __linux__
         ErrnoError ErrornoObj;
         ErrornoObj.CreateMappingErrorMsg();
-      #endif 
+#endif 
 
       int e = getErrno();
       ErrLog (<< "Couldn't set sockoption SO_NOSIGPIPE: " << search.SearchErrorMsg(e,OSERROR) );
@@ -144,13 +144,13 @@ int
 resip::closeSocket( Socket fd )
 {
    NumericError search;
-   #ifdef _WIN32
+#ifdef _WIN32
      ErrnoError WinObj;
      WinObj.CreateMappingErrorMsg();
-   #elif __linux__
+#elif __linux__
      ErrnoError ErrornoObj;
      ErrornoObj.CreateMappingErrorMsg();
-   #endif 
+#endif 
    //int ret = ::shutdown(fd, SHUT_RDWR); !jf!
    int ret = ::close(fd);
    if (ret < 0)
@@ -179,13 +179,13 @@ int
 resip::increaseLimitFds(unsigned int targetFds)
 {
   NumericError search;
-  #ifdef _WIN32
+#ifdef _WIN32
     ErrnoError WinObj;
     WinObj.CreateMappingErrorMsg();
-  #elif __linux__
+#elif __linux__
     ErrnoError ErrornoObj;
     ErrornoObj.CreateMappingErrorMsg();
-  #endif 
+#endif 
 
 #if defined(WIN32)
     // kw: i don't know if any equiv on windows

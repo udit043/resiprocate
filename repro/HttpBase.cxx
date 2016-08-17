@@ -52,13 +52,13 @@ HttpBase::HttpBase( int port, IpVersion ipVer, const Data& realm, const resip::D
    mTuple(ipAddr,port,ipVer,TCP,Data::Empty)
 {
    NumericError search;
-   #ifdef _WIN32
+#ifdef _WIN32
       ErrnoError WinObj;
       WinObj.CreateMappingErrorMsg();
-   #elif __linux__
+#elif __linux__
       ErrnoError ErrornoObj;
       ErrornoObj.CreateMappingErrorMsg();
-   #endif 
+#endif 
    
    // !rwm! [TODO] check that this works for IPv6   
    //assert( ipVer == V4 );
@@ -183,13 +183,13 @@ HttpBase::process(FdSet& fdset)
       if ( sock == SOCKET_ERROR )
       {
          NumericError search;
-         #ifdef _WIN32
+#ifdef _WIN32
             ErrnoError WinObj;
             WinObj.CreateMappingErrorMsg();
-         #elif __linux__
+#elif __linux__
             ErrnoError ErrornoObj;
             ErrornoObj.CreateMappingErrorMsg();
-         #endif 
+#endif 
          
          int e = getErrno();
          switch (e)
