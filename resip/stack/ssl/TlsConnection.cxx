@@ -312,7 +312,7 @@ TlsConnection::checkState()
                         DebugLog(<<"peer supplied a ceritifcate, but it has not been checked or it was checked successfully : " << search.SearchErrorMsg(verifyErrorCode,X509ERROR) );
                         break;
                      default:
-                        ErrLog(<<"peer certificate validation failure : " << search.SearchErrorMsg(verifyErrorCode,X509ERROR) ); //X509_verify_cert_error_string(verifyErrorCode));
+                        ErrLog(<<"peer certificate validation failure : " << search.SearchErrorMsg(verifyErrorCode,X509ERROR) );
                         DebugLog(<<"additional validation checks may have failed but only one is ever logged - please check peer certificate carefully");
                         break;
                   }
