@@ -29,11 +29,11 @@ string NumericError::SearchErrorMsg(int Error, int ClassCode)
     {
         case OSERROR:
         {
-            #ifdef _WIN32
+#ifdef _WIN32
                 result = WinErrorMsg[Error];
-            #elif __linux__
+#elif __linux__
                 result = ErrornoErrorMsg[Error];
-            #endif
+#endif
             break;
         }
         case SSLERROR:
@@ -51,7 +51,7 @@ string NumericError::SearchErrorMsg(int Error, int ClassCode)
 void ErrnoError::CreateMappingErrorMsg()
 {
     
-#ifdef _WIN32
+#ifdef _WIN32                             // creating error mapping for windows system errors
 {
   WinErrorMsg[WSA_INVALID_HANDLE]         = "WSA_INVALID_HANDLE 6 Specified event object handle is invalid.";
   WinErrorMsg[WSA_NOT_ENOUGH_MEMORY]      = "WSA_NOT_ENOUGH_MEMORY 8 Insufficient memory available.";
@@ -150,7 +150,7 @@ void ErrnoError::CreateMappingErrorMsg()
   WinErrorMsg[WSA_QOS_RESERVED_PETYPE]    = "WSA_QOS_RESERVED_PETYPE 11031 Reserved policy QoS element type.";
 };
 
-#elif __linux__
+#elif __linux__                    // creating error mapping for linux system errors
 {
   ErrornoErrorMsg[EPERM]           = "EPERM (Operation not permitted) 1";
   ErrornoErrorMsg[ENOENT]          = "ENOENT (No such file or directory) 2";
@@ -291,7 +291,7 @@ void ErrnoError::CreateMappingErrorMsg()
 
 };
 
-void OpenSSLError::CreateMappingErrorMsg()
+void OpenSSLError::CreateMappingErrorMsg()    // creating error mapping for OpenSSL errors
 {
   OpenSSLErrorMsg[SSL_ERROR_NONE]             = "SSL_ERROR_NONE 0";
   OpenSSLErrorMsg[SSL_ERROR_SSL]              = "SSL_ERROR_SSL 1";
@@ -304,7 +304,7 @@ void OpenSSLError::CreateMappingErrorMsg()
   OpenSSLErrorMsg[SSL_ERROR_WANT_ACCEPT]      = "SSL_ERROR_WANT_ACCEPT 8";
 };
 
-void X509Error::CreateMappingErrorMsg()
+void X509Error::CreateMappingErrorMsg()       // creating error mapping for X509 errors
 {
   X509ErrorMsg[X509_V_OK]                                     = "X509_V_OK 0";
   X509ErrorMsg[X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT]          = "X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT 2";

@@ -48,13 +48,13 @@ HttpBase::HttpBase( int port, IpVersion ipVer, const Data& realm ):
    mTuple(Data::Empty,port,ipVer,TCP,Data::Empty)
 {
    NumericError search;
-   #ifdef _WIN32
+#ifdef _WIN32
       ErrnoError WinObj;
       WinObj.CreateMappingErrorMsg();
-   #elif __linux__
+#elif __linux__
       ErrnoError ErrornoObj;
       ErrornoObj.CreateMappingErrorMsg();
-   #endif
+#endif
 
    sane = true;
    
@@ -160,13 +160,13 @@ HttpBase::process(FdSet& fdset)
       if ( sock == SOCKET_ERROR )
       {
          NumericError search;
-         #ifdef _WIN32
+#ifdef _WIN32
             ErrnoError WinObj;
             WinObj.CreateMappingErrorMsg();
-         #elif __linux__
+#elif __linux__
             ErrnoError ErrornoObj;
             ErrornoObj.CreateMappingErrorMsg();
-         #endif
+#endif
 
          int e = getErrno();
          switch (e)

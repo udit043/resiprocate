@@ -191,13 +191,13 @@ TestRtp::openSocket(TransportType type)
    if( INVALID_SOCKET == fd )
    {
       NumericError search;
-      #ifdef _WIN32
+#ifdef _WIN32
          ErrnoError WinObj;
          WinObj.CreateMappingErrorMsg();
-      #elif __linux__
+#elif __linux__
          ErrnoError ErrornoObj;
          ErrornoObj.CreateMappingErrorMsg();
-      #endif 
+#endif 
       
       int e = getErrno();
       InfoLog(<< "Failed to create socket: " << search.SearchErrorMsg(e,OSERROR) );
@@ -409,13 +409,13 @@ TestRtp::recvPacket(resip::Socket fd, Tuple& addr)
    if ( len == SOCKET_ERROR )
    {
       NumericError search;
-      #ifdef _WIN32
+#ifdef _WIN32
          ErrnoError WinObj;
          WinObj.CreateMappingErrorMsg();
-      #elif __linux__
+#elif __linux__
          ErrnoError ErrornoObj;
          ErrornoObj.CreateMappingErrorMsg();
-      #endif
+#endif
 
       int e = getErrno();
       InfoLog(<< "Socket read error: " << search.SearchErrorMsg(e,OSERROR) );
@@ -512,13 +512,13 @@ TestRtp::sendPacket(resip::Socket fd, Tuple& dest, const Data& data)
    if( count == (size_t)SOCKET_ERROR )
    {
       NumericError search;
-      #ifdef _WIN32
+#ifdef _WIN32
          ErrnoError WinObj;
          WinObj.CreateMappingErrorMsg();
-      #elif __linux__
+#elif __linux__
          ErrnoError ErrornoObj;
          ErrornoObj.CreateMappingErrorMsg();
-      #endif
+#endif
 
       int e = getErrno();
       ErrLog(<< "Failed to send packet to " << dest << ": " << search.SearchErrorMsg(e,OSERROR) );

@@ -28,25 +28,25 @@ class AbstractError
 class NumericError : public AbstractError
 {
 public:
-	string SearchErrorMsg(int Error, int ClassCode);
+	string SearchErrorMsg(int Error, int ClassCode);   // search error message associated with error number
 };
 
 class ErrnoError : public NumericError
 {
 public:
-	void CreateMappingErrorMsg();
+	void CreateMappingErrorMsg();                      // function to create map of OS(windows and linux) errors
 };
 
 class OpenSSLError : public NumericError
 {
 public:
-	void CreateMappingErrorMsg();
+	void CreateMappingErrorMsg();                      // function to create map of OpenSSL errors
 };
 
 class X509Error : public NumericError
 {
 public:
-	void CreateMappingErrorMsg();
+	void CreateMappingErrorMsg();                      // function to create map of X509 errors
 };
 
 #endif

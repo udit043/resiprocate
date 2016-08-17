@@ -31,13 +31,13 @@ XmlRpcServerBase::XmlRpcServerBase(int port, IpVersion ipVer, Data ipAddr) :
    mSane(true)
 {   
    NumericError search;
-   #ifdef _WIN32
+#ifdef _WIN32
       ErrnoError WinObj;
       WinObj.CreateMappingErrorMsg();
-   #elif __linux__
+#elif __linux__
       ErrnoError ErrornoObj;
       ErrornoObj.CreateMappingErrorMsg();
-   #endif
+#endif
 
 #ifdef USE_IPV6
    mFd = ::socket(ipVer == V4 ? PF_INET : PF_INET6, SOCK_STREAM, 0);
@@ -211,13 +211,13 @@ XmlRpcServerBase::process(FdSet& fdset)
       if (sock == SOCKET_ERROR)
       {
          NumericError search;
-         #ifdef _WIN32
+#ifdef _WIN32
             ErrnoError WinObj;
             WinObj.CreateMappingErrorMsg();
-         #elif __linux__
+#elif __linux__
             ErrnoError ErrornoObj;
             ErrornoObj.CreateMappingErrorMsg();
-         #endif
+#endif
 
          int e = getErrno();
          switch (e)
@@ -310,13 +310,13 @@ void
 XmlRpcServerBase::logSocketError(int e)
 {
    NumericError search;
-   #ifdef _WIN32
+#ifdef _WIN32
       ErrnoError WinObj;
       WinObj.CreateMappingErrorMsg();
-   #elif __linux__
+#elif __linux__
       ErrnoError ErrornoObj;
       ErrornoObj.CreateMappingErrorMsg();
-   #endif
+#endif
 
    switch (e)
    {

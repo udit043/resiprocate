@@ -138,13 +138,13 @@ DnsUtil::getLocalHostName()
       if (gethostname(buffer,sizeof(buffer)-1) == -1)
       {
          NumericError search;
-         #ifdef _WIN32
+#ifdef _WIN32
             ErrnoError WinObj;
             WinObj.CreateMappingErrorMsg();
-         #elif __linux__
+#elif __linux__
             ErrnoError ErrornoObj;
             ErrornoObj.CreateMappingErrorMsg();
-         #endif 
+#endif 
          
          int err = getErrno();
          switch (err)
@@ -216,13 +216,13 @@ DnsUtil::getLocalDomainName()
          if ( e != 0 )
          {
             NumericError search;
-            #ifdef _WIN32
+#ifdef _WIN32
                ErrnoError WinObj;
                WinObj.CreateMappingErrorMsg();
-            #elif __linux__
+#elif __linux__
                ErrnoError ErrornoObj;
                ErrornoObj.CreateMappingErrorMsg();
-            #endif
+#endif
 
             int err = getErrno();
             CritLog(<< "Couldn't find domainname: " << search.SearchErrorMsg(err,OSERROR) );

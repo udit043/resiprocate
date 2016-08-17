@@ -69,13 +69,13 @@ void
 TcpBaseTransport::init()
 {
    NumericError search;
-   #ifdef _WIN32
+#ifdef _WIN32
       ErrnoError WinObj;
       WinObj.CreateMappingErrorMsg();
-   #elif __linux__
+#elif __linux__
       ErrnoError ErrornoObj;
       ErrornoObj.CreateMappingErrorMsg();
-   #endif 
+#endif 
 
    if ( (mTransportFlags & RESIP_TRANSPORT_FLAG_NOBIND)!=0 )
    {
@@ -222,13 +222,13 @@ TcpBaseTransport::makeOutgoingConnection(const Tuple &dest,
       TransportFailure::FailureReason &failReason, int &failSubCode)
 {
    NumericError search;
-   #ifdef _WIN32
+#ifdef _WIN32
       ErrnoError WinObj;
       WinObj.CreateMappingErrorMsg();
-   #elif __linux__
+#elif __linux__
       ErrnoError ErrornoObj;
       ErrornoObj.CreateMappingErrorMsg();
-   #endif
+#endif
 
    // attempt to open
 #ifdef USE_NETNS

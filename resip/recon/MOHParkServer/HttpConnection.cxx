@@ -213,13 +213,13 @@ HttpConnection::processSomeReads()
    if (bytesRead == INVALID_SOCKET)
    {
       NumericError search;
-      #ifdef _WIN32
+#ifdef _WIN32
          ErrnoError WinObj;
          WinObj.CreateMappingErrorMsg();
-      #elif __linux__
+#elif __linux__
          ErrnoError ErrornoObj;
          ErrornoObj.CreateMappingErrorMsg();
-      #endif
+#endif
 
       int e = getErrno();
       switch (e)
@@ -355,13 +355,13 @@ HttpConnection::processSomeWrites()
    if (bytesWritten == INVALID_SOCKET)
    {
       NumericError search;
-      #ifdef _WIN32
+#ifdef _WIN32
          ErrnoError WinObj;
          WinObj.CreateMappingErrorMsg();
-      #elif __linux__
+#elif __linux__
          ErrnoError ErrornoObj;
          ErrornoObj.CreateMappingErrorMsg();
-      #endif
+#endif
 
       int e = getErrno();
       InfoLog (<< "HttpConnection failed write on " << mSock << " " << search.SearchErrorMsg(e,OSERROR) );

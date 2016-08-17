@@ -193,13 +193,13 @@ ServerProcess::daemonize()
    NumericError search;
    OpenSSLError OpenSSLObj;
    OpenSSLObj.CreateMappingErrorMsg();
-   #ifdef _WIN32
+#ifdef _WIN32
       ErrnoError WinObj;
       WinObj.CreateMappingErrorMsg();
-   #elif __linux__
+#elif __linux__
       ErrnoError ErrornoObj;
       ErrornoObj.CreateMappingErrorMsg();
-   #endif 
+#endif 
 
 #ifdef WIN32
    // fork is not possible on Windows

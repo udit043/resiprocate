@@ -169,13 +169,13 @@ DtlsTransport::_read( FdSet& fdset )
    if ( len == SOCKET_ERROR )
    {
       NumericError search;
-      #ifdef _WIN32
+#ifdef _WIN32
         ErrnoError WinObj;
         WinObj.CreateMappingErrorMsg();
-      #elif __linux__
+#elif __linux__
         ErrnoError ErrornoObj;
         ErrornoObj.CreateMappingErrorMsg();
-      #endif
+#endif
 
       int err = getErrno() ;
       if ( err != EAGAIN && err != EWOULDBLOCK ) // Treat EGAIN and EWOULDBLOCK as the same: http://stackoverflow.com/questions/7003234/which-systems-define-eagain-and-ewouldblock-as-different-values
@@ -598,13 +598,13 @@ void DtlsTransport::_write( FdSet& fdset )
             break;
          case SSL_ERROR_SYSCALL:
             {
-                #ifdef _WIN32
+#ifdef _WIN32
                   ErrnoError WinObj;
                   WinObj.CreateMappingErrorMsg();
-                #elif __linux__
+#elif __linux__
                   ErrnoError ErrornoObj;
                   ErrornoObj.CreateMappingErrorMsg();
-                #endif  
+#endif  
 
                int e = getErrno();
                error(e);

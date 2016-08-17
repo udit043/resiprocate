@@ -264,13 +264,13 @@ TlsConnection::checkState()
          default:
             if(err == SSL_ERROR_SYSCALL)
             {
-            	#ifdef _WIN32
+#ifdef _WIN32
       				ErrnoError WinObj;
       				WinObj.CreateMappingErrorMsg();
-   				#elif __linux__
+#elif __linux__
       				ErrnoError ErrornoObj;
       				ErrornoObj.CreateMappingErrorMsg();
-   				#endif
+#endif
    				   
                int e = getErrno();
                switch(e)

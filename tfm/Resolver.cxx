@@ -307,13 +307,13 @@ resip::Data
 Resolver::getHostName()
 {
    NumericError search;
-   #ifdef _WIN32
+#ifdef _WIN32
       ErrnoError WinObj;
       WinObj.CreateMappingErrorMsg();
-   #elif __linux__
+#elif __linux__
       ErrnoError ErrornoObj;
       ErrornoObj.CreateMappingErrorMsg();
-   #endif
+#endif
 
    char buffer[255];
    if (gethostname(buffer, sizeof(buffer)) < 0)

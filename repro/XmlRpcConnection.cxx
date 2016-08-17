@@ -104,13 +104,13 @@ XmlRpcConnection::processSomeReads()
    if (bytesRead == INVALID_SOCKET)
    {
       NumericError search;
-      #ifdef _WIN32
+#ifdef _WIN32
          ErrnoError WinObj;
          WinObj.CreateMappingErrorMsg();
-      #elif __linux__
+#elif __linux__
          ErrnoError ErrornoObj;
          ErrornoObj.CreateMappingErrorMsg();
-      #endif
+#endif
 
       int e = getErrno();
       XmlRpcServerBase::logSocketError(e);
@@ -196,13 +196,13 @@ XmlRpcConnection::processSomeWrites()
    if (bytesWritten == INVALID_SOCKET)
    {
       NumericError search;
-      #ifdef _WIN32
+#ifdef _WIN32
          ErrnoError WinObj;
          WinObj.CreateMappingErrorMsg();
-      #elif __linux__
+#elif __linux__
          ErrnoError ErrornoObj;
          ErrornoObj.CreateMappingErrorMsg();
-      #endif
+#endif
       
       int e = getErrno();
       XmlRpcServerBase::logSocketError(e);

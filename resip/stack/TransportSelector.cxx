@@ -597,13 +597,13 @@ Tuple
 TransportSelector::getFirstInterface(bool is_v4, TransportType type)
 {
    NumericError search;
-   #ifdef _WIN32
+#ifdef _WIN32
       ErrnoError WinObj;
       WinObj.CreateMappingErrorMsg();
-   #elif __linux__
+#elif __linux__
       ErrnoError ErrornoObj;
       ErrornoObj.CreateMappingErrorMsg();
-   #endif 
+#endif 
 // !kh! both getaddrinfo() and IPv6 are not supported by cygwin, yet.
 #ifdef __CYGWIN__
    resip_assert(0);
@@ -720,13 +720,13 @@ Tuple
 TransportSelector::determineSourceInterface(SipMessage* msg, const Tuple& target) const
 {
    NumericError search;
-   #ifdef _WIN32
+#ifdef _WIN32
       ErrnoError WinObj;
       WinObj.CreateMappingErrorMsg();
-   #elif __linux__
+#elif __linux__
       ErrnoError ErrornoObj;
       ErrornoObj.CreateMappingErrorMsg();
-   #endif
+#endif
 
    resip_assert(msg->exists(h_Vias));
    resip_assert(!msg->header(h_Vias).empty());
