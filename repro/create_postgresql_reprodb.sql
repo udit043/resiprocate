@@ -41,7 +41,7 @@ CREATE UNIQUE INDEX idx_user_domain ON users (username, domain);
 
 CREATE TABLE IF NOT EXISTS routesavp (
   method VARCHAR(255) NOT NULL,
-  event VARCHAR(255),
+  event VARCHAR(255) NOT NULL,
   matchingpattern VARCHAR(255),
   rewriteexpression VARCHAR(255),
   order VARCHAR(255),
@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS routesavp (
 
 CREATE TABLE IF NOT EXISTS aclsavp (
   tlspeername VARCHAR(255) NOT NULL,
-  address VARCHAR(255),
+  address VARCHAR(255) NOT NULL,
   mask VARCHAR(255),
   port VARCHAR(255),
   family VARCHAR(255),
@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS configsavp (
 
 CREATE TABLE IF NOT EXISTS staticregsavp (
   aor VARCHAR(255) NOT NULL,
-  contact VARCHAR(255),
+  contact VARCHAR(255) NOT NULL,
   mpath VARCHAR(255), 
   PRIMARY KEY (aor, contact)
 );
@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS staticregsavp (
 
 CREATE TABLE IF NOT EXISTS filtersavp (
   cond1header VARCHAR(255) NOT NULL,
-  cond1regex VARCHAR(255),
+  cond1regex VARCHAR(255) NOT NULL,
   cond2header VARCHAR(255),
   cond2regex VARCHAR(255),
   method VARCHAR(255),
