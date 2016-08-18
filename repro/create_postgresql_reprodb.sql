@@ -40,8 +40,12 @@ CREATE UNIQUE INDEX idx_user_domain ON users (username, domain);
 --
 
 CREATE TABLE IF NOT EXISTS routesavp (
-  attr VARCHAR(255) PRIMARY KEY,
-  value VARCHAR(4096)
+  method VARCHAR(255) NOT NULL,
+  event VARCHAR(255) NOT NULL,
+  matchingpattern VARCHAR(255),
+  rewriteexpression VARCHAR(255),
+  order VARCHAR(255),
+  PRIMARY KEY (method, event)
 );
 
 --
@@ -49,8 +53,13 @@ CREATE TABLE IF NOT EXISTS routesavp (
 --
 
 CREATE TABLE IF NOT EXISTS aclsavp (
-  attr VARCHAR(255) PRIMARY KEY,
-  value VARCHAR(4096)
+  tlspeername VARCHAR(255) NOT NULL,
+  address VARCHAR(255) NOT NULL,
+  mask VARCHAR(255),
+  port VARCHAR(255),
+  family VARCHAR(255),
+  transport VARCHAR(255),
+  PRIMARY KEY (tlspeername, address)
 );
 
 --
@@ -58,8 +67,9 @@ CREATE TABLE IF NOT EXISTS aclsavp (
 --
 
 CREATE TABLE IF NOT EXISTS configsavp (
-  attr VARCHAR(255) PRIMARY KEY,
-  value VARCHAR(4096)
+  domain VARCHAR(255) NOT NULL,
+  tlsport VARCHAR(255),
+  PRIMARY KEY (domain)
 );
 
 --
@@ -67,8 +77,10 @@ CREATE TABLE IF NOT EXISTS configsavp (
 --
 
 CREATE TABLE IF NOT EXISTS staticregsavp (
-  attr VARCHAR(255) PRIMARY KEY,
-  value VARCHAR(4096)
+  aor VARCHAR(255) NOT NULL,
+  contact VARCHAR(255) NOT NULL,
+  mpath VARCHAR(255), 
+  PRIMARY KEY (aor, contact)
 );
 
 --
@@ -76,8 +88,13 @@ CREATE TABLE IF NOT EXISTS staticregsavp (
 --
 
 CREATE TABLE IF NOT EXISTS filtersavp (
-  attr VARCHAR(255) PRIMARY KEY,
-  value VARCHAR(4096)
+  cond1header VARCHAR(255) NOT NULL,
+  cond1regex VARCHAR(255) NOT NULL,
+  cond2header VARCHAR(255),
+  cond2regex VARCHAR(255),
+  method VARCHAR(255),
+  event VARCHAR(255),
+  PRIMARY KEY (cond1header, cond1regex)
 );
 
 --
@@ -86,13 +103,15 @@ CREATE TABLE IF NOT EXISTS filtersavp (
 --
 
 CREATE TABLE IF NOT EXISTS siloavp (
-  attr VARCHAR(255) NOT NULL,
-  attr2 VARCHAR(255) NOT NULL,
-  value VARCHAR(20315),
-  PRIMARY KEY (attr, attr2)
+  desturi VARCHAR(255) NOT NULL,
+  sourceuri VARCHAR(255) NOT NULL,
+  senttime VARCHAR(24),
+  tid VARCHAR(255),
+  mimetype VARCHAR(255),
+  msgbody VARCHAR(255),
+  PRIMARY KEY (desturi, sourceuri, senttime)
 );
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON users, routesavp,
   aclsavp, configsavp, staticregsavp, filtersavp, siloavp TO repro;
 GRANT USAGE, SELECT, UPDATE ON users_id_seq TO repro;
-
