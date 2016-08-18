@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS siloavp (
   tid VARCHAR(255),
   mimetype VARCHAR(255),
   msgbody VARCHAR(255),
-  PRIMARY KEY (desturi, sourceuri, sendtime)
+  PRIMARY KEY (desturi, sourceuri, senttime)
 );
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON users, routesavp,
