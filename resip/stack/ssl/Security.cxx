@@ -120,17 +120,20 @@ verifyCallback(int iInCode, X509_STORE_CTX *pInStore)
    }
  
    return iInCode;
-} 
+}
+ 
 }
 
 bool IsDomainInDefCert(const char *servername)
 {
    if (strcasecmp(servername, "ws.sip5060.net") == 0)
    {
+      DebugLog ( << "Server name matched" );
       return true;
    }
    else
    {
+      DebugLog ( << "Server name does not matched" );
       return false;
    }
 }
@@ -138,27 +141,22 @@ bool IsDomainInDefCert(const char *servername)
 static int
 ssl_servername_cb(SSL *ssl, int *ad, void *arg)
 {
-    resip_assert(ssl);
-    if (ssl == NULL)
-        return SSL_TLSEXT_ERR_NOACK;
+   resip_assert(ssl);
+   if (ssl == NULL)
+      return SSL_TLSEXT_ERR_NOACK;
 
-    const char* servername = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
-    resip_assert(servername && servername[0]);
-    if (!servername || servername[0] == '\0')
-        return SSL_TLSEXT_ERR_NOACK;
+   const char* servername = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+   if (!servername || servername[0] == '\0')
+   {
+      DebugLog( << "Client do not support SNI extension" );
+      return SSL_TLSEXT_ERR_NOACK;
+   }
 
-    /* Does the default cert already handle this domain? */
-    if (!IsDomainInDefCert(servername))
-        return SSL_TLSEXT_ERR_NOACK;
+   /* Does the default cert already handle this domain? */
+   if (!IsDomainInDefCert(servername))
+      return SSL_TLSEXT_ERR_NOACK;
 
-    /* Need a new certificate for this domain */
-/*    SSL_CTX* ctx = GetServerContext(servername);
-    resip_assert(ctx != NULL);
-    if (ctx == NULL)
-        return SSL_TLSEXT_ERR_NOACK;   
-*/
-
-    return SSL_TLSEXT_ERR_OK;
+   return SSL_TLSEXT_ERR_OK;
 }
 
 // .amr. RFC 5922 mandates exact match only on certificates, so this is the default, but RFC 2459 and RFC 3261 don't prevent wildcards, so enable if you want that mode.
