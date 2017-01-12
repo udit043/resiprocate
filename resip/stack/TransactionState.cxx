@@ -9,6 +9,7 @@
 #include "resip/stack/TerminateFlow.hxx"
 #include "resip/stack/EnableFlowTimer.hxx"
 #include "resip/stack/ZeroOutStatistics.hxx"
+#include "resip/stack/InvokeAfterSocketCreationFunc.hxx"
 #include "resip/stack/PollStatistics.hxx"
 #include "resip/stack/ConnectionTerminated.hxx"
 #include "resip/stack/KeepAlivePong.hxx"
@@ -477,6 +478,12 @@ TransactionState::process(TransactionController& controller,
          controller.mTransportSelector.removeTransport(removeTransport->getTransportKey());
          delete removeTransport;
          return;
+      }
+
+      InvokeAfterSocketCreationFunc* invokeAfterSocketCreationFunc = dynamic_cast<InvokeAfterSocketCreationFunc*>(message);
+      if(invokeAfterSocketCreationFunc)
+      {
+          controller.mTransportSelector.invokeAfterSocketCreationFunc(invokeAfterSocketCreationFunc->getTransportType());
       }
    }
    
@@ -1104,12 +1111,14 @@ TransactionState::processClientNonInvite(TransactionMessage* msg)
             break;
 
          case Timer::TcpConnectTimer:
-             if (!mTcpConnectTimerStarted) // Ignore timer if we we connected (note: when we connect we set mTcpConnectTimerStarted to false)
+             if (mTcpConnectTimerStarted) // Ignore timer if we went connected (note: when we connect we set mTcpConnectTimerStarted to false)
              {
-                 delete msg;
-                 break;
+                 TransportFailure failure(mId, TransportFailure::ConnectionException);
+                 processTransportFailure(&failure);
              }
-             // else fallthrough 
+             delete msg;
+             break;
+
          case Timer::TimerF:
             if (mState == Trying || mState == Proceeding)
             {
@@ -1389,12 +1398,14 @@ TransactionState::processClientInvite(TransactionMessage* msg)
             break;
 
          case Timer::TcpConnectTimer:
-             if (!mTcpConnectTimerStarted) // Ignore timer we we connected (note: when we connect we set mTcpConnectTimerStarted to false)
+             if (mTcpConnectTimerStarted) // Ignore timer if we went connected (note: when we connect we set mTcpConnectTimerStarted to false)
              {
-                 delete msg;
-                 break;
+                 TransportFailure failure(mId, TransportFailure::ConnectionException);
+                 processTransportFailure(&failure);
              }
-             // else fallthrough
+             delete msg;
+             break;
+
          case Timer::TimerB:
             if (mState == Calling)
             {

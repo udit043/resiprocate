@@ -14,7 +14,6 @@
 
 #include "repro/RegSyncClient.hxx"
 #include "repro/RegSyncServer.hxx"
-#include "rutil/Errdes.hxx"
 
 using namespace repro;
 using namespace resip;
@@ -94,7 +93,7 @@ RegSyncClient::thread()
       if(mSocketDesc < 0) 
       {
          int e = getErrno();
-         ErrLog(<< "RegSyncClient: cannot open socket, errno = " << e << " error message : " << errortostringOS(e) );
+         ErrLog(<< "RegSyncClient: cannot open socket, err=" << e);
          mSocketDesc = 0;
          return;
       }
@@ -104,7 +103,7 @@ RegSyncClient::thread()
       if(rc < 0) 
       {
          int e = getErrno();
-         ErrLog(<<"RegSyncClient: error binding locally, errno = " << e << " error message : " << errortostringOS(e) );
+         ErrLog(<<"RegSyncClient: error binding locally, err=" << e);
          closeSocket(mSocketDesc);
          mSocketDesc = 0;
          return;
@@ -115,7 +114,7 @@ RegSyncClient::thread()
       if(rc < 0) 
       {
          int e = getErrno();
-         if(!mShutdown) ErrLog(<< "RegSyncClient: error connecting to " << mAddress << ":" << mPort << ", errno = " << e << " error message : " << errortostringOS(e) );
+         if(!mShutdown) ErrLog(<< "RegSyncClient: error connecting to " << mAddress << ":" << mPort << ", err=" << e);
          closeSocket(mSocketDesc);
          mSocketDesc = 0;
          delaySeconds(30);
@@ -132,7 +131,7 @@ RegSyncClient::thread()
       if(rc < 0) 
       {
          int e = getErrno();
-         if(!mShutdown) ErrLog(<< "RegSyncClient: error sending, errno = " << e << " error message : " << errortostringOS(e) );
+         if(!mShutdown) ErrLog(<< "RegSyncClient: error sending, err=" << e);
          closeSocket(mSocketDesc);
          mSocketDesc = 0;
          continue;
@@ -143,7 +142,7 @@ RegSyncClient::thread()
       if (!ok)
       {
          int e = getErrno();
-         ErrLog(<< "RegSyncClient: Could not make HTTP socket non-blocking, errno = " << e << " error message : " << errortostringOS(e) );
+         ErrLog(<< "RegSyncClient: Could not make HTTP socket non-blocking, err=" << e);
          closeSocket(mSocketDesc);
          mSocketDesc = 0;
          continue;
@@ -164,7 +163,7 @@ RegSyncClient::thread()
             if(rc < 0) 
             {
                int e = getErrno();
-               if(!mShutdown) ErrLog(<< "RegSyncClient: error receiving, errno = " << e << " error message : " << errortostringOS(e) );
+               if(!mShutdown) ErrLog(<< "RegSyncClient: error receiving, err=" << e);
                closeSocket(mSocketDesc);
                mSocketDesc = 0;
                break;
@@ -185,7 +184,7 @@ RegSyncClient::thread()
                // If send is blocking then we must have pending send data - so just ignore error - no need to keepalive
                if ( e != EAGAIN && e != EWOULDBLOCK ) // Treat EGAIN and EWOULDBLOCK as the same: http://stackoverflow.com/questions/7003234/which-systems-define-eagain-and-ewouldblock-as-different-values
                {
-                  if(!mShutdown) ErrLog(<< "RegSyncClient: error sending keepalive, errno = " << e << " error message : " << errortostringOS(e) );
+                  if(!mShutdown) ErrLog(<< "RegSyncClient: error sending keepalive, err=" << e);
                   closeSocket(mSocketDesc);
                   mSocketDesc = 0;
                   continue;
@@ -199,7 +198,7 @@ RegSyncClient::thread()
          else
          {
              int e = getErrno();
-             if(!mShutdown) ErrLog(<< "RegSyncClient: error calling select, errno = " << e << " error message : " << errortostringOS(e) );
+             if(!mShutdown) ErrLog(<< "RegSyncClient: error calling select, err=" << e);
              closeSocket(mSocketDesc);
              mSocketDesc = 0;
              break;

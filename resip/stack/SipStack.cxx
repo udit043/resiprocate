@@ -72,7 +72,8 @@ SipStack::SipStack(Security* pSecurity,
                    bool stateless,
                    AfterSocketCreationFuncPtr socketFunc,
                    Compression *compression,
-                   FdPollGrp *pollGrp) :
+                   FdPollGrp *pollGrp,
+                   bool useDnsVip) :
 #ifdef WIN32
    // If PollGrp is not passed in, then EventStackThead isn't being used and application
    // is most likely implementing a select/process loop to drive the stack - in this case
@@ -99,7 +100,7 @@ SipStack::SipStack(Security* pSecurity,
    mTuSelector(mTUFifo),
    mAppTimers(mTuSelector),
    mStatsManager(*this),
-   mTransactionController(new TransactionController(*this, mAsyncProcessHandler)),
+   mTransactionController(new TransactionController(*this, mAsyncProcessHandler, useDnsVip)),
    mTransactionControllerThread(0),
    mTransportSelectorThread(0),
    mInternalThreadsRunning(false),
@@ -201,7 +202,7 @@ SipStack::init(const SipStackOptions& options)
 
    // WATCHOUT: the transaction controller constructor will
    // grab the security, DnsStub, compression and statsManager
-   mTransactionController = new TransactionController(*this, mAsyncProcessHandler);
+   mTransactionController = new TransactionController(*this, mAsyncProcessHandler, options.mUseDnsVip);
    mTransactionController->transportSelector().setPollGrp(mPollGrp);
    mTransactionControllerThread = 0;
    mTransportSelectorThread = 0;
@@ -1213,6 +1214,12 @@ SipStack::getDnsCacheDump(std::pair<unsigned long, unsigned long> key, GetDnsCac
    mDnsStub->getDnsCacheDump(key, handler);
 }
 
+void 
+SipStack::reloadDnsServers()
+{
+   mDnsStub->reloadDnsServers();
+}
+
 volatile bool&
 SipStack::statisticsManagerEnabled()
 {
@@ -1241,9 +1248,11 @@ SipStack::dump(EncodeStream& strm)  const
    }
    strm << " ServerTransactionMap size=" << this->mTransactionController->mServerTransactionMap.size() << std::endl
         << " ClientTransactionMap size=" << this->mTransactionController->mClientTransactionMap.size() << std::endl
-        // !slg! TODO - There is technically a threading concern with the following three lines and the runtime addTransport call
-        << " Exact Transports=" << Inserter(this->mTransactionController->mTransportSelector.mExactTransports) << std::endl
-        << " Any Transports=" << Inserter(this->mTransactionController->mTransportSelector.mAnyInterfaceTransports) << std::endl
+        // !slg! TODO - There is technically a threading concern with the following three lines and the runtime addTransport or removeTransport call
+        << " Exact interface / Specific port=" << Inserter(this->mTransactionController->mTransportSelector.mExactTransports) << std::endl
+        << " Any interface / Specific port=" << Inserter(this->mTransactionController->mTransportSelector.mAnyInterfaceTransports) << std::endl
+        << " Exact interface / Any port =" << Inserter(this->mTransactionController->mTransportSelector.mAnyPortTransports) << std::endl
+        << " Any interface / Any port=" << Inserter(this->mTransactionController->mTransportSelector.mAnyPortAnyInterfaceTransports) << std::endl
         << " TLS Transports=" << Inserter(this->mTransactionController->mTransportSelector.mTlsTransports) << std::endl;
    return strm;
 }
@@ -1264,6 +1273,13 @@ void
 SipStack::enableFlowTimer(const resip::Tuple& flow)
 {
    mTransactionController->enableFlowTimer(flow);
+}
+
+void
+SipStack::invokeAfterSocketCreationFunc(TransportType type)
+{
+    // Stack is assummed to be running.  Need to queue invoke request for TransactionController Thread
+    mTransactionController->invokeAfterSocketCreationFunc(type);
 }
 
 /* ====================================================================

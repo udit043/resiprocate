@@ -12,7 +12,6 @@
 #include "rutil/Logger.hxx"
 #include "rutil/Inserter.hxx"
 #include "rutil/WinLeakCheck.hxx"
-#include "rutil/Errdes.hxx"
 
 using namespace resip;
 using namespace std;
@@ -357,6 +356,13 @@ GenericPidfContents::merge(const GenericPidfContents& other)
    return mergeNoCheckParse(other);
 }
 
+void
+GenericPidfContents::setRootNodes(const NodeList& nodeList)
+{
+   mRootNodes.clear();
+   mRootNodes = nodeList;
+}
+
 const Data&
 GenericPidfContents::getSubNodeValue(Node* node, const Data& tag)
 {
@@ -566,16 +572,6 @@ GenericPidfContents::setSimplePresenceTupleNode(const Data& id,
    statusNode->mChildren.push_back(basicNode);
    tupleNode->mChildren.push_back(statusNode);
 
-   // Add Note node if required
-   if (!note.empty())
-   {
-      Node* noteNode = new Node();
-      noteNode->mNamespacePrefix = mRootPidfNamespacePrefix;
-      noteNode->mTag = "note";
-      noteNode->mValue = note;
-      tupleNode->mChildren.push_back(noteNode);
-   }
-
    // Add Contact node if required
    if (!contact.empty())
    {
@@ -588,6 +584,16 @@ GenericPidfContents::setSimplePresenceTupleNode(const Data& id,
          contactNode->mAttributes["priority"] = contactPriority;
       }
       tupleNode->mChildren.push_back(contactNode);
+   }
+
+   // Add Note node if required
+   if (!note.empty())
+   {
+      Node* noteNode = new Node();
+      noteNode->mNamespacePrefix = mRootPidfNamespacePrefix;
+      noteNode->mTag = "note";
+      noteNode->mValue = note;
+      tupleNode->mChildren.push_back(noteNode);
    }
 
    // Add Timestamp node if required
@@ -813,7 +819,7 @@ GenericPidfContents::generateTimestampData(time_t datetime)
    if (gmtp == 0)
    {
       int e = getErrno();
-      DebugLog(<< "Failed to convert to gmt: " << errortostringOS(e));
+      DebugLog(<< "Failed to convert to gmt: " << strerror(e));
       return Data::Empty;
    }
    memcpy(&gmt, gmtp, sizeof(gmt));
@@ -821,7 +827,7 @@ GenericPidfContents::generateTimestampData(time_t datetime)
    if (gmtime_r(&datetime, &gmt) == 0)
    {
       int e = getErrno();
-      DebugLog(<< "Failed to convert to gmt: " << errortostringOS(e));
+      DebugLog(<< "Failed to convert to gmt: " << strerror(e));
       return Data::Empty;
    }
 #endif

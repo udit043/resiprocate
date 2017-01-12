@@ -36,7 +36,10 @@ MediaStream::MediaStream(asio::io_service& ioService,
                          const char* natTraversalServerHostname, 
                          unsigned short natTraversalServerPort, 
                          const char* stunUsername,
-                         const char* stunPassword) :
+                         const char* stunPassword,
+                         bool forceCOMedia,
+                         SharedPtr<RTCPEventLoggingHandler> rtcpEventLoggingHandler,
+                         SharedPtr<FlowContext> context) :
 #ifdef USE_SSL
    mDtlsFactory(dtlsFactory),
 #endif  
@@ -47,6 +50,7 @@ MediaStream::MediaStream(asio::io_service& ioService,
    mNatTraversalServerPort(natTraversalServerPort),
    mStunUsername(stunUsername),
    mStunPassword(stunPassword),
+   mForceCOMedia(forceCOMedia),
    mMediaStreamHandler(mediaStreamHandler)
 {
    // Rtcp is enabled if localRtcpBinding transport type != None
@@ -60,7 +64,10 @@ MediaStream::MediaStream(asio::io_service& ioService,
 #endif
                           RTP_COMPONENT_ID, 
                           localRtpBinding, 
-                          *this);
+                          *this,
+                          mForceCOMedia,
+                          SharedPtr<RTCPEventLoggingHandler>(),
+                          context);
 
       mRtcpFlow = new Flow(ioService, 
 #ifdef USE_SSL
@@ -68,7 +75,10 @@ MediaStream::MediaStream(asio::io_service& ioService,
 #endif
                            RTCP_COMPONENT_ID,
                            localRtcpBinding, 
-                           *this);
+                           *this,
+                           mForceCOMedia,
+                           rtcpEventLoggingHandler,
+                           context);
 
       mRtpFlow->activateFlow(StunMessage::PropsPortPair);
 
@@ -86,7 +96,10 @@ MediaStream::MediaStream(asio::io_service& ioService,
 #endif
                           RTP_COMPONENT_ID,
                           localRtpBinding, 
-                          *this);
+                          *this,
+                          mForceCOMedia,
+                          SharedPtr<RTCPEventLoggingHandler>(),
+                          context);
       mRtpFlow->activateFlow(StunMessage::PropsPortEven);
       mRtcpFlow = 0;
    }

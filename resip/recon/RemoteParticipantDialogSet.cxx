@@ -44,7 +44,8 @@ using namespace std;
 #define RESIPROCATE_SUBSYSTEM ReconSubsystem::RECON
 
 RemoteParticipantDialogSet::RemoteParticipantDialogSet(ConversationManager& conversationManager,        
-                                                       ConversationManager::ParticipantForkSelectMode forkSelectMode) :
+                                                       ConversationManager::ParticipantForkSelectMode forkSelectMode,
+                                                       SharedPtr<ConversationProfile> conversationProfile) :
    AppDialogSet(conversationManager.getUserAgent()->getDialogUsageManager()),
    mConversationManager(conversationManager),
    mUACOriginalRemoteParticipant(0),
@@ -53,6 +54,8 @@ RemoteParticipantDialogSet::RemoteParticipantDialogSet(ConversationManager& conv
    mLocalRTPPort(0),
    mAllocateLocalRTPPortFailed(false),
    mForkSelectMode(forkSelectMode),
+   mConversationProfile(conversationProfile),
+   mFlowContext(new FlowContext()),
    mUACConnectedDialogId(Data::Empty, Data::Empty, Data::Empty),
    mActiveRemoteParticipantHandle(0),
    mNatTraversalMode(flowmanager::MediaStream::NoNatTraversal),
@@ -97,7 +100,6 @@ RemoteParticipantDialogSet::getLocalRTPPort()
 {
    if(mLocalRTPPort == 0 && !mAllocateLocalRTPPortFailed)
    {
-      bool isUAC = false;
       mLocalRTPPort = mConversationManager.allocateRTPPort();
       if(mLocalRTPPort == 0)
       {
@@ -114,12 +116,18 @@ RemoteParticipantDialogSet::getLocalRTPPort()
       ConversationProfile* profile = dynamic_cast<ConversationProfile*>(getUserProfile().get());
       if(!profile)
       {
+         DebugLog(<<"no ConversationProfile in DialogSet::mUserProfile");
+         profile = mConversationProfile.get();
+      }
+      if(!profile)
+      {
+         DebugLog(<<"no ConversationProfile in RemoteParticipantDialogSet::mConversationProfile, falling back to default for UAC");
          profile = mConversationManager.getUserAgent()->getDefaultOutgoingConversationProfile().get();
-         isUAC = true;
       }
 
       OsStatus ret;
       Data connectionAddr = profile->sessionCaps().session().connection().getAddress();
+      DebugLog(<< "getLocalRTPPort: Using local connection address: " << connectionAddr);
       // Create localBinding Tuple - note:  transport may be changed depending on NAT traversal mode
       StunTuple localBinding(StunTuple::UDP, asio::ip::address::from_string(connectionAddr.c_str()), mLocalRTPPort);
 
@@ -192,7 +200,9 @@ RemoteParticipantDialogSet::getLocalRTPPort()
                      profile->natTraversalServerHostname().c_str(), 
                      profile->natTraversalServerPort(), 
                      profile->stunUsername().c_str(), 
-                     profile->stunPassword().c_str()); 
+                     profile->stunPassword().c_str(),
+                     profile->forceCOMedia(),
+                     mFlowContext);
 
          // New Remote Participant - create media Interface connection
          mRtpSocket = new FlowManagerSipXSocket(mMediaStream->getRtpFlow(), mConversationManager.mSipXTOSValue);
@@ -617,6 +627,11 @@ AppDialog*
 RemoteParticipantDialogSet::createAppDialog(const SipMessage& msg)
 {
    mNumDialogs++;
+
+   if(mFlowContext->getSipCallId().empty())
+   {
+      mFlowContext->setSipCallId(msg.header(h_CallId).value());
+   }
 
    if(mUACOriginalRemoteParticipant)  // UAC DialogSet
    {

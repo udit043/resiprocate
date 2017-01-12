@@ -21,7 +21,6 @@
 #include "rutil/ParseBuffer.hxx"
 
 #include "Resolver.hxx"
-#include "rutil/Errdes.hxx"
 
 #define RESIPROCATE_SUBSYSTEM resip::Subsystem::SIP
 
@@ -89,7 +88,7 @@ Resolver::Resolver(const Uri& uri) :
       Tuple tuple;
       if (inet_pton(AF_INET, mHost.c_str(), &tuple.ipv4.s_addr) <= 0)
       {
-         DebugLog( << "inet_pton failed to parse address: " << mHost << " " << errortostringOS(errno));
+         DebugLog( << "inet_pton failed to parse address: " << mHost << " " << strerror(errno));
          assert(0);
       }
       tuple.port = mPort;
@@ -130,7 +129,7 @@ Resolver::Resolver(const Data& host, int port, TransportType transport)
       Tuple tuple;
       if (inet_pton(AF_INET, mHost.c_str(), &tuple.ipv4.s_addr) <= 0)
       {
-         DebugLog( << "inet_pton failed to parse address: " << mHost << " " << errortostringOS(errno));
+         DebugLog( << "inet_pton failed to parse address: " << mHost << " " << strerror(errno));
          assert(0);
       }
       tuple.port = mPort;
@@ -156,8 +155,8 @@ Resolver::lookupARecords()
 #else
 
 #if defined( WIN32 ) || defined( __APPLE__ ) || defined (__SUNPRO_CC) || defined(__FreeBSD__)
-   assert(0); // !cj! 
-   int ret = -1;
+	assert(0); // !cj! 
+	int ret = -1;
 #else
         int ret = gethostbyname_r (mHost.c_str(), &hostbuf, buffer, sizeof(buffer), &result, &herrno);
 #endif
@@ -232,7 +231,7 @@ Resolver::getHostName()
    char buffer[255];
    if (gethostname(buffer, sizeof(buffer)) < 0)
    {
-      InfoLog (<< "Failed gethostname() " << errortostringOS(errno));
+      InfoLog (<< "Failed gethostname() " << strerror(errno));
       return "localhost";
    }
    else

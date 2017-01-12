@@ -14,7 +14,6 @@ EXTRA_DIST += ParameterHash.gperf
 EXTRA_DIST += parametersA.gperf
 EXTRA_DIST += Readme-Compliance.txt
 EXTRA_DIST += *.vcxproj *.vcxproj.filters
-EXTRA_DIST += *.vcproj
 EXTRA_DIST += ssl/WinSecurity.cxx
 
 SUBDIRS = . test
@@ -81,6 +80,7 @@ libresip_la_SOURCES = \
 	CpimContents.cxx \
 	DataParameter.cxx \
 	DeprecatedDialog.cxx \
+	DialogInfoContents.cxx \
 	DnsInterface.cxx \
 	DnsResult.cxx \
 	DtlsMessage.cxx \
@@ -94,6 +94,7 @@ libresip_la_SOURCES = \
 	QValueParameter.cxx \
 	GenericContents.cxx \
 	GenericPidfContents.cxx \
+	HEPSipMessageLoggingHandler.cxx \
 	HeaderFieldValue.cxx \
 	HeaderFieldValueList.cxx \
 	gen/HeaderHash.cxx \
@@ -134,6 +135,7 @@ libresip_la_SOURCES = \
 	SdpContents.cxx \
 	SecurityAttributes.cxx \
 	Compression.cxx \
+	SipConfigParse.cxx \
 	SipFrag.cxx \
 	SipMessage.cxx \
 	SipStack.cxx \
@@ -243,6 +245,7 @@ nobase_resipinclude_HEADERS = AbandonServerTransaction.hxx \
 	DataParameter.hxx \
 	DateCategory.hxx \
 	DeprecatedDialog.hxx \
+	DialogInfoContents.hxx \
 	DnsInterface.hxx \
 	DnsResult.hxx \
 	DnsResultMessage.hxx \
@@ -261,6 +264,7 @@ nobase_resipinclude_HEADERS = AbandonServerTransaction.hxx \
 	GenericContents.hxx \
 	GenericPidfContents.hxx \
 	GenericUri.hxx \
+	HEPSipMessageLoggingHandler.hxx \
 	HeaderFieldValue.hxx \
 	HeaderFieldValueList.hxx \
 	HeaderHash.hxx \
@@ -273,6 +277,7 @@ nobase_resipinclude_HEADERS = AbandonServerTransaction.hxx \
 	InteropHelper.hxx \
 	InterruptableStackThread.hxx \
 	InvalidContents.hxx \
+	InvokeAfterSocketCreationFunc.hxx \
 	KeepAliveMessage.hxx \
 	KeepAlivePong.hxx \
 	LazyParser.hxx \
@@ -320,6 +325,7 @@ nobase_resipinclude_HEADERS = AbandonServerTransaction.hxx \
 	SendData.hxx \
 	SERNonceHelper.hxx \
 	ShutdownMessage.hxx \
+	SipConfigParse.hxx \
 	SipFrag.hxx \
 	SipMessage.hxx \
 	SipStack.hxx \

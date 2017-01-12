@@ -59,7 +59,7 @@ members are accessed from the TransactionController processing loop.
 class TransportSelector
 {
    public:
-      TransportSelector(Fifo<TransactionMessage>& fifo, Security* security, DnsStub& dnsStub, Compression &compression);
+      TransportSelector(Fifo<TransactionMessage>& fifo, Security* security, DnsStub& dnsStub, Compression &compression, bool useDnsVip);
       virtual ~TransportSelector();
 
       /**
@@ -153,6 +153,8 @@ class TransportSelector
          }
       }
 
+      void invokeAfterSocketCreationFunc(TransportType type);
+
       /**
          @internal - public only for stream operator access
       */
@@ -200,6 +202,7 @@ class TransportSelector
       Transport* findTransportByVia(SipMessage* msg, const Tuple& dest, Tuple& src) const;
       Transport* findTlsTransport(const Data& domain,TransportType type,IpVersion ipv) const;
       Tuple determineSourceInterface(SipMessage* msg, const Tuple& dest) const;
+      void rebuildAnyPortTransportMaps(void);
 
       DnsInterface mDns;
       Fifo<TransactionMessage>& mStateMacFifo;

@@ -49,7 +49,6 @@
 #endif
 
 #include "rutil/WinLeakCheck.hxx"
-#include "rutil/Errdes.hxx"
 
 #include <openssl/e_os2.h>
 #include <openssl/evp.h>
@@ -246,10 +245,7 @@ DtlsTransport::_read( FdSet& fdset )
       switch( err )
       {
          case SSL_ERROR_NONE:
-            {
-               DebugLog( << errortostringSSL(err) );
-               break ;
-            }
+            break ;
          case SSL_ERROR_SSL:
             {
                ERR_error_string_n(ERR_get_error(), errorString, sizeof(errorString));
@@ -260,15 +256,9 @@ DtlsTransport::_read( FdSet& fdset )
             }
             break ;
          case SSL_ERROR_WANT_READ:
-            {
-               DebugLog( << errortostringSSL(err) );
-               break ;
-            }
+            break ;
          case SSL_ERROR_WANT_WRITE:
-            {
-               DebugLog( << errortostringSSL(err) );
-               break ;
-            }
+            break ;
          case SSL_ERROR_SYSCALL:
             {
                ERR_error_string_n(ERR_get_error(), errorString, sizeof(errorString));
@@ -291,15 +281,9 @@ DtlsTransport::_read( FdSet& fdset )
             }
             break ;
          case SSL_ERROR_WANT_CONNECT:
-            {
-               DebugLog( << errortostringSSL(err) );
-               break ;
-            }
+            break ;
          case SSL_ERROR_WANT_ACCEPT:
-            {
-               DebugLog( << errortostringSSL(err) );
-               break ;
-            }
+            break ;
          default:
             break ;
       }
@@ -551,10 +535,7 @@ void DtlsTransport::_write( FdSet& fdset )
       switch( err )
       {
          case SSL_ERROR_NONE:
-            {
-               DebugLog( << errortostringSSL(err) );
-               break ;
-            }
+            break;
          case SSL_ERROR_SSL:
             {
                ERR_error_string_n(ERR_get_error(), errorString, sizeof(errorString));
@@ -564,18 +545,12 @@ void DtlsTransport::_write( FdSet& fdset )
             }
             break;
          case SSL_ERROR_WANT_READ:
-            {
-               retry = 1 ;
-               DebugLog( << errortostringSSL(err) );
-               break ;
-            }
+            retry = 1 ;
+            break;
          case SSL_ERROR_WANT_WRITE:
-            {
-               retry = 1 ;
-               fdset.setWrite(mFd);
-               DebugLog( << errortostringSSL(err) );
-               break;
-            }
+             retry = 1 ;
+             fdset.setWrite(mFd);
+            break;
          case SSL_ERROR_SYSCALL:
             {
                int e = getErrno();
@@ -601,15 +576,9 @@ void DtlsTransport::_write( FdSet& fdset )
             }
             break ;
          case SSL_ERROR_WANT_CONNECT:
-            {
-               DebugLog( << errortostringSSL(err) );
-               break ;
-            }
+            break;
          case SSL_ERROR_WANT_ACCEPT:
-            {
-               DebugLog( << errortostringSSL(err) );
-               break ;
-            }
+            break;
          default:
             break ;
       }
@@ -651,10 +620,7 @@ DtlsTransport::_doHandshake( void )
       switch (err)
       {
          case SSL_ERROR_NONE:
-            {
-               DebugLog( << errortostringSSL(err) );
-               break ;
-            }
+            break;
          case SSL_ERROR_SSL:
             {
                ERR_error_string_n(ERR_get_error(), errorString, sizeof(errorString));
@@ -663,15 +629,9 @@ DtlsTransport::_doHandshake( void )
             }
             break;
          case SSL_ERROR_WANT_READ:
-            {
-               DebugLog( << errortostringSSL(err) );
-               break ;
-            }
+            break;
          case SSL_ERROR_WANT_WRITE:
-            {
-               DebugLog( << errortostringSSL(err) );
-               break ;
-            }
+            break;
          case SSL_ERROR_SYSCALL:
             {
                ERR_error_string_n(ERR_get_error(), errorString, sizeof(errorString));
@@ -687,15 +647,9 @@ DtlsTransport::_doHandshake( void )
             }
             break;
          case SSL_ERROR_WANT_CONNECT:
-            {
-               DebugLog( << errortostringSSL(err) );
-               break ;
-            }
+            break;
          case SSL_ERROR_WANT_ACCEPT:
-            {
-               DebugLog( << errortostringSSL(err) );
-               break ;
-            }
+            break;
          default:
             break ;
       }

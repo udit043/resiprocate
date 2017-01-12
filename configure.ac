@@ -1,5 +1,5 @@
 
-AC_INIT(resiprocate,1.10.0)
+AC_INIT(resiprocate,1.11.0~alpha11)
 AC_CONFIG_SRCDIR(repro/repro.cxx)
 
 SO_RELEASE=`echo $PACKAGE_VERSION | cut -f1,2 -d.`
@@ -14,7 +14,7 @@ AC_SUBST(LIBTOOL_VERSION_RELEASE)
 
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_MACRO_DIR([m4])
-AM_INIT_AUTOMAKE([foreign subdir-objects])
+AM_INIT_AUTOMAKE([foreign subdir-objects tar-pax])
 m4_pattern_forbid([^PKG_])
 
 AC_CANONICAL_HOST
@@ -198,7 +198,7 @@ AM_CONDITIONAL(USE_MYSQL, false)
 AC_ARG_WITH(mysql,
 [  --with-mysql            Link against MySQL client libraries],
  [AC_DEFINE_UNQUOTED(USE_MYSQL, , USE_MYSQL)
- AC_SUBST(LIBMYSQL_LIBADD, "-lmysqlclient_r")
+ AC_SUBST(LIBMYSQL_LIBADD, "-lmysqlclient")
  AM_CONDITIONAL(USE_MYSQL, true)], 
  [ AC_SUBST(LIBMYSQL_LIBADD, "")])
 
@@ -284,7 +284,9 @@ AM_CONDITIONAL(BUILD_TELEPATHY_CM, false)
 AC_ARG_WITH(telepathy,
 [  --with-telepathy        Build the Telepathy Connection Manager],
  [AC_DEFINE_UNQUOTED(BUILD_TELEPATHY_CM, , BUILD_TELEPATHY_CM)
- AM_CONDITIONAL(BUILD_TELEPATHY_CM, true)], )
+ AM_CONDITIONAL(BUILD_TELEPATHY_CM, true)
+ PKG_CHECK_MODULES([QT5], [Qt5Core, Qt5DBus Qt5Network])
+ PKG_CHECK_MODULES([TP_QT5], [TelepathyQt5, TelepathyQt5Service])])
 
 AM_CONDITIONAL(BUILD_RECON, false)
 AC_ARG_WITH(recon,
@@ -359,6 +361,7 @@ AC_OUTPUT(Makefile \
 	apps/ichat-gw/jabberconnector/Makefile \
 	apps/sipdial/Makefile \
 	apps/telepathy/Makefile \
+	apps/telepathy/data/Makefile \
 	resiprocate.spec \
 	reTurn/Makefile \
 	reTurn/test/Makefile \

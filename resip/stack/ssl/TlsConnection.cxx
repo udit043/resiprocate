@@ -10,7 +10,6 @@
 #include "rutil/Logger.hxx"
 #include "resip/stack/Uri.hxx"
 #include "rutil/Socket.hxx"
-#include "rutil/Errdes.hxx"
 
 #include <openssl/e_os2.h>
 #include <openssl/evp.h>
@@ -155,11 +154,11 @@ TlsConnection::~TlsConnection()
             {
                // WANT_READ or WANT_WRITE can arise for bi-directional shutdown on
                // non-blocking sockets, safe to ignore
-               StackLog( << "Got TLS shutdown error condition of " << err << " " << errortostringSSL(err) );
+               StackLog( << "Got TLS shutdown error condition of " << err  );
             }
             break;
          default:
-            ErrLog(<< "Unexpected error in SSL_shutdown "<< errortostringSSL(err) );
+            ErrLog(<<"Unexpected error in SSL_shutdown");
             handleOpenSSLErrorQueue(ret, err, "SSL_shutdown");
       }
    }
@@ -207,6 +206,11 @@ TlsConnection::checkState()
       else
       {
          InfoLog( << "TLS handshake starting (client mode)" );
+         /* OpenSSL version < 0.9.8f does not support SSL_set_tlsext_host_name() */
+#if defined(SSL_set_tlsext_host_name)
+            DebugLog ( << "TLS SNI extension in Client Hello: " << who().getTargetDomain());
+            SSL_set_tlsext_host_name(mSsl,who().getTargetDomain().c_str()); // set the SNI hostname
+#endif
          SSL_set_connect_state(mSsl);
          mTlsState = Handshaking;
       }
@@ -225,31 +229,31 @@ TlsConnection::checkState()
       switch (err)
       {
          case SSL_ERROR_WANT_READ:
-            StackLog( << "TLS handshake want read" << errortostringSSL(err) );
+            StackLog( << "TLS handshake want read" );
             mHandShakeWantsRead = true;
             return mTlsState;
 
          case SSL_ERROR_WANT_WRITE:
-            StackLog( << "TLS handshake want write" << errortostringSSL(err) );
+            StackLog( << "TLS handshake want write" );
             ensureWritable();
             return mTlsState;
 
          case SSL_ERROR_ZERO_RETURN:
-            StackLog( << "TLS connection closed cleanly" << errortostringSSL(err) );
+            StackLog( << "TLS connection closed cleanly");
             return mTlsState;
 
          case SSL_ERROR_WANT_CONNECT:
-            StackLog( << "BIO not connected, try later" << errortostringSSL(err) );
+            StackLog( << "BIO not connected, try later");
             return mTlsState;
 
 #if  ( OPENSSL_VERSION_NUMBER >= 0x0090702fL )
          case SSL_ERROR_WANT_ACCEPT:
-            StackLog( << "TLS connection want accept" << errortostringSSL(err) );
+            StackLog( << "TLS connection want accept" );
             return mTlsState;
 #endif
 
          case SSL_ERROR_WANT_X509_LOOKUP:
-            DebugLog( << "Try later / SSL_ERROR_WANT_X509_LOOKUP" << errortostringSSL(err) );
+            DebugLog( << "Try later / SSL_ERROR_WANT_X509_LOOKUP");
             return mTlsState;
 
          default:
@@ -266,7 +270,7 @@ TlsConnection::checkState()
                      StackLog( << "try later");
                      return mTlsState;
                }
-               ErrLog( << "socket error " << errortostringOS(e) );
+               ErrLog( << "socket error " << e);
                Transport::error(e);
                if(e == 0)
                {
@@ -292,7 +296,7 @@ TlsConnection::checkState()
                         DebugLog(<<"peer supplied a ceritifcate, but it has not been checked or it was checked successfully");
                         break;
                      default:
-                        ErrLog(<<"peer certificate validation failure: " << errortostringX509(verifyErrorCode));    //X509_verify_cert_error_string(verifyErrorCode));
+                        ErrLog(<<"peer certificate validation failure: " << X509_verify_cert_error_string(verifyErrorCode));
                         DebugLog(<<"additional validation checks may have failed but only one is ever logged - please check peer certificate carefully");
                         break;
                   }
@@ -317,7 +321,7 @@ TlsConnection::checkState()
             }
             else
             {
-               DebugLog(<<"unrecognised/unhandled SSL_get_error result: " << errortostringSSL(err) );
+               DebugLog(<<"unrecognised/unhandled SSL_get_error result: " << err);
             }
             ErrLog( << "TLS handshake failed ");
             handleOpenSSLErrorQueue(ok, err, "SSL_do_handshake");
@@ -448,13 +452,13 @@ TlsConnection::read(char* buf, int count )
          case SSL_ERROR_WANT_WRITE:
          case SSL_ERROR_NONE:
          {
-            StackLog( << "Got TLS read got condition of " << errortostringSSL(err)  );
+            StackLog( << "Got TLS read got condition of " << err  );
             return 0;
          }
          break;
          case SSL_ERROR_ZERO_RETURN:
          {
-            DebugLog( << "Got SSL_ERROR_ZERO_RETURN (TLS shutdown by peer)" << errortostringSSL(err));
+            DebugLog( << "Got SSL_ERROR_ZERO_RETURN (TLS shutdown by peer)");
             return -1;
          }
          break;
@@ -541,13 +545,13 @@ TlsConnection::write( const char* buf, int count )
          case SSL_ERROR_WANT_WRITE:
          case SSL_ERROR_NONE:
          {
-            StackLog( << "Got TLS write got condition of " << errortostringSSL(err) );
+            StackLog( << "Got TLS write got condition of " << err  );
             return 0;
          }
          break;
          case SSL_ERROR_ZERO_RETURN:
          {
-            DebugLog( << "Got SSL_ERROR_ZERO_RETURN (TLS shutdown by peer)" << errortostringSSL(err) );
+            DebugLog( << "Got SSL_ERROR_ZERO_RETURN (TLS shutdown by peer)");
             return -1;
          }
          break;

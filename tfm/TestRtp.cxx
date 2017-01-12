@@ -5,7 +5,6 @@
 #include "rutil/Data.hxx"
 #include "rutil/Socket.hxx"
 #include "rutil/DnsUtil.hxx"
-#include "rutil/Errdes.hxx"
 #include "resip/stack/SipMessage.hxx"
 
 #include "Expect.hxx"
@@ -191,7 +190,7 @@ TestRtp::openSocket(TransportType type)
    if( INVALID_SOCKET == fd )
    {
       int e = getErrno();
-      InfoLog(<< "Failed to create socket: " << errortostringOS(e));
+      InfoLog(<< "Failed to create socket: " << strerror(e));
    }
 
    return fd;
@@ -400,7 +399,7 @@ TestRtp::recvPacket(resip::Socket fd, Tuple& addr)
    if ( len == SOCKET_ERROR )
    {
       int e = getErrno();
-      InfoLog(<< "Socket read error: " << errortostringOS(e));
+      InfoLog(<< "Socket read error: " << strerror(e));
    }
 
    if (len == 0 || len == SOCKET_ERROR)
@@ -494,7 +493,7 @@ TestRtp::sendPacket(resip::Socket fd, Tuple& dest, const Data& data)
    if( count == (size_t)SOCKET_ERROR )
    {
       int e = getErrno();
-      ErrLog(<< "Failed to send packet to " << dest << ": " << errortostringOS(e));
+      ErrLog(<< "Failed to send packet to " << dest << ": " << strerror(e));
    }
    else
    {
