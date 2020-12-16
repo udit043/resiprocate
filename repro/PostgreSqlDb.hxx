@@ -33,13 +33,6 @@ class PostgreSqlDb: public SqlDb
       virtual Key firstUserKey();// return empty if no more
       virtual Key nextUserKey(); // return empty if no more 
 
-      virtual bool addRoute(const Key& key, const RouteRecord& rec); 
-      virtual bool addAcl(const Key& key, const AclRecord& rec);
-      virtual bool addConfig(const Key& key, const ConfigRecord& rec);
-      virtual bool addStaticReg(const Key& key, const StaticRegRecord& rec);
-      virtual bool addFilter(const Key& key, const FilterRecord& rec);
-      virtual bool addToSilo(const Key& key, const SiloRecord& rec);
-      
       // Perform a query that expects a single result/row - returns all column/field data in a vector
       virtual int singleResultQuery(const resip::Data& queryCommand, std::vector<resip::Data>& fields) const;
 
